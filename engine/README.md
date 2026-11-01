@@ -74,7 +74,9 @@ See [docs/DESIGN.md](docs/DESIGN.md). In short:
    `check` lints exactly that.
 4. **Native motion graphics.** 15 frame-pure templates drawn with tiny-skia and Inter
    (0.1 to 2.6 ms per 1080p frame), in Samin's look: dark dot-grid canvas, screen in the left
-   panel, camera tile on the right, step badge above it.
+   panel, camera tile on the right, step badge above it. When no template fits, a `scene`
+   beat is a custom animation in YAML: layered text, shapes, arrows, images, code and counters,
+   each entering on its own word (0.3 to 2 ms per frame; [docs/SCENE.md](docs/SCENE.md)).
 5. **Agents do only judgement.** `cutroom agent` (or Claude Code with `skill/SKILL.md`) reads a
    compact transcript (`w123 one sentence per line`, tagged `[talk]` or `[screen]`) and writes
    YAML. Each chapter is a separate call, in parallel; every answer is validated by `check` and
@@ -110,9 +112,9 @@ Anchors: `w123` (word id from `cutroom brief`), `"a phrase"` (`#2` for the secon
 | `video` | real footage / b-roll in the panel | `lower` | lower-third |
 | `code` | prompt or command typing on | `blur` | hide private info (mosaic) |
 | `quote` | quote card | `zoom` | push into part of the screen |
-| | | `layout` | panel / screen / camera for a stretch |
+| `scene` | custom animation: layered text, shapes, arrows, images, code, counters, keyframed to words ([docs/SCENE.md](docs/SCENE.md)) | `layout` | panel / screen / camera for a stretch |
 
-`*word*` in title, bullets and quote text is drawn in the accent colour.
+`*word*` in title, bullets, quote and scene text is drawn in the accent colour.
 
 ## Privacy
 

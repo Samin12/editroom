@@ -49,6 +49,7 @@ Anchors: `w123` (from brief), `"a phrase he says"` (`#2` = 2nd match), `s:754.2`
 | video | src, from?, caption? | real footage / b-roll in the panel |
 | code | text, title? | a prompt or command typing on |
 | quote | text, by? | a quote / tweet line |
+| scene | layers: [...], place: stage/frame?, bg: none/card/canvas? | a CUSTOM animation: text, boxes, circles, lines, arrows (attach by id), images (with `ring`), code, counters, highlights, each entering on its own word. See docs/SCENE.md |
 | ring | rect | circle something on the screen recording |
 | highlight | rect, underline? | marker on screen text |
 | arrow | from: [x,y], to: [x,y] | point at something on screen |
@@ -58,9 +59,27 @@ Anchors: `w123` (from brief), `"a phrase he says"` (`#2` = 2nd match), `s:754.2`
 | zoom | rect | push into a region of the screen |
 | layout | mode: panel/screen/camera | change layout for a stretch |
 
-`*word*` in title/bullets/quote text draws that word in the accent colour.
+`*word*` in title/bullets/quote/scene text draws that word in the accent colour.
 `rect`/`from`/`to` are SCREEN-normalized (0..1 of the screen recording) so they stay on target
 through zooms and layout changes. Find them on a `cutroom still` of that moment.
+
+## Custom animations (`scene`)
+When no template fits (a diagram, a stat beside its proof, a timeline, a before/after), write a
+`scene`: 3-9 layers in the panel (`place: stage`) or over the whole frame (`place: frame`, keep
+x < 0.78 for the camera tile). Geometry is 0..1 of the box; sizes are units of a 1920-wide box.
+Anchor each layer's `in: {at: ...}` to the word that introduces it.
+```yaml
+- at: "how Claude talks to Poppy"
+  until: "in seconds."
+  kind: scene
+  layers:
+    - {type: text, text: "How *Claude* talks to Poppy", x: 0.07, y: 0.08, size: 88, weight: bold}
+    - {id: a, type: box, x: 0.06, y: 0.4, w: 0.25, h: 0.24, label: Claude, sub: your agent, in: {at: "Claude"}}
+    - {id: b, type: box, x: 0.69, y: 0.4, w: 0.25, h: 0.24, label: Poppy, in: {at: "Poppy", from: pop}}
+    - {type: arrow, from: a, to: b, in: {at: "talks"}}
+    - {type: counter, to: 10075, prefix: "$", x: 0.5, y: 0.72, size: 120, in: {at: "ten thousand"}}
+```
+Full field list, timing rules and four copy-paste examples: docs/SCENE.md.
 
 ## Rules that keep quality high
 - Proof over animation: when he claims something, show the real page (`image` with `highlight`).
