@@ -79,7 +79,7 @@ pub fn beats_prompt(o: &BeatsOpts) -> String {
     s.push_str("- {at: wN, kind: number, value: \"$10,075\", label: \"paid for one video\"}   a number he says; the number is the biggest thing in the frame\n");
     s.push_str("- {at: wN, kind: code, title: \"Prompt\", text: \"...\"}   a prompt or command he reads out (types on)\n");
     s.push_str("- {at: wN, kind: quote, text: \"...\", by: \"...\"}   a quote he cites\n");
-    s.push_str("- {at: wN, kind: image, src: proof/<slug>.png, source: \"site.com\", caption: \"...\", proof: {claim: \"...\", find: \"...\"}}   PROOF of a claim about the outside world (a price, a stat, a product page, a tweet, a repo). The screenshot is captured later: `claim` is exactly what it must show, `find` where to get it (a URL or a precise search); `slug` is short kebab-case\n");
+    s.push_str("- {at: wN, kind: image, src: proof/<slug>.png, source: \"site.com\", caption: \"YouTube: the #2 search engine\", proof: {claim: \"...\", find: \"...\"}}   PROOF of a claim about the outside world (a price, a stat, a product page, a tweet, a repo). The screenshot is captured later. `caption` is what the viewer reads under it: his claim in at most 7 words, with the number or name in it. `claim` is the fact the screenshot must show, as a plain statement. `find` is where to get it (a URL or a precise search). `slug` is short kebab-case\n");
     if !o.images.is_empty() || !o.videos.is_empty() {
         s.push_str("- {at: wN, kind: image, src: <file>, caption: \"...\", source: \"...\"} or {at: wN, kind: video, src: <file>}   one of these existing files:\n");
         for f in o.images.iter().chain(&o.videos).take(60) {

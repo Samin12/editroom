@@ -62,10 +62,12 @@ pub fn pending(dir: &Path) -> Result<Vec<Pending>> {
     Ok(out)
 }
 
-/// What a missing proof turns into: the claim as a title (short) or quote on camera, as a callout
-/// over the screen, or nothing when it is too long for either.
+/// What a missing proof turns into: its caption (what the viewer was meant to read; the claim when
+/// there is none) as a title (short) or quote on camera, as a callout over the screen, or nothing
+/// when it is too long for either.
 pub fn fallback(p: &Pending, orig: &Value) -> Option<Value> {
-    let n = p.claim.split_whitespace().count();
+    let text = orig.get("caption").and_then(|v| v.as_str()).map(str::trim).filter(|t| !t.is_empty()).unwrap_or(p.claim.trim()).trim_end_matches('.').to_string();
+    let n = text.split_whitespace().count();
     let kind = match (p.line, n) {
         ("talk", 1..=7) => "title",
         ("talk", 8..=25) => "quote",
@@ -79,7 +81,7 @@ pub fn fallback(p: &Pending, orig: &Value) -> Option<Value> {
         }
     }
     m.insert(Value::from("kind"), Value::from(kind));
-    m.insert(Value::from("text"), Value::from(p.claim.trim_end_matches('.').to_string()));
+    m.insert(Value::from("text"), Value::from(text));
     Some(Value::Mapping(m))
 }
 

@@ -285,7 +285,7 @@ fn proofs_list_pending_and_drop_missing_falls_back_to_text() {
     let dir = work("proofs", &src);
     std::fs::write(
         dir.join("beats/ch01.yaml"),
-        "beats:\n  - {at: w0, kind: title, text: Hi}\n  - {at: w8, kind: image, src: proof/rates.png, proof: {claim: \"LaunchPoint pays $10,075\", find: launchpoint.app}}\n  - {at: w17, kind: image, src: proof/long.png, proof: {claim: \"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six\"}}\n",
+        "beats:\n  - {at: w0, kind: title, text: Hi}\n  - {at: w8, kind: image, src: proof/rates.png, caption: \"LaunchPoint pays $10,075.\", proof: {claim: \"The LaunchPoint campaign page lists $10,075 for one video\", find: launchpoint.app}}\n  - {at: w17, kind: image, src: proof/long.png, proof: {claim: \"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six\"}}\n",
     )
     .unwrap();
     let p = crate::proofs::pending(&dir).unwrap();
