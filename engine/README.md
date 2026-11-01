@@ -15,6 +15,18 @@ cutroom sheet work/ --beats -o sheet.png             # every visual in one image
 cutroom render work/ -o final.mp4                    # + final.chapters.txt + final.srt
 ```
 
+Studio mode (each section a film rendered elsewhere, placed frame-exact; see
+[docs/STUDIO.md](docs/STUDIO.md)):
+
+```
+cutroom slots work/ [--json]                         # sections as frame-exact slots + the beat line that places a film
+cutroom timing work/ --slot ch03 [--words]           # kept words in the slot's frame clock (f = frames from the film's start)
+cutroom boxes proof/x.png --phrase "the number"      # glyph boxes of a phrase in a screenshot (highlight rects)
+cutroom check-render film.mp4 --work work/ --slot ch03   # frame count, empty panel, holds, tile/badge clear, beat leads
+cutroom sheet-video film.mp4 --every 2 -o s.png      # contact sheet of a render
+cutroom canvas --at 12.5 -o c.png                    # the dot grid at an output time (docs/CANVAS.md)
+```
+
 ## Measured on a real project
 
 Samin's 4-hour raw course recording ("Grow Your Business with YouTube + Claude", 49 scenes,

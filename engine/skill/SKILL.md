@@ -22,6 +22,12 @@ cutroom sheet work/ --beats -o /tmp/sheet.png   # look at it (one image = every 
 cutroom render work/ -o final.mp4 # + final.chapters.txt + final.srt
 ```
 
+Studio mode (films rendered elsewhere, one per section): `cutroom slots work/ --json` (exact
+frames + the beat line per slot), `cutroom timing work/ --slot ch03` (words in the film's frame
+clock), `cutroom boxes proof/x.png --phrase ".."` (highlight rects), `cutroom check-render film.mp4
+--work work/ --slot ch03`, `cutroom sheet-video film.mp4 --every 2 -o s.png`. Details:
+docs/STUDIO.md and docs/CANVAS.md.
+
 ## 1. Cuts
 `cutroom cut` writes confident cuts to `cuts.yaml` and only the ambiguous ones to `review.md`
 (each with context and word ids). Decide each item, then `cutroom cut work/ --accept 1,3,7-9`.
@@ -39,7 +45,9 @@ chapters:
   - {at: "the first thing you need", title: Find the idea, short: Idea}
 ```
 Cards are inserted (1.8 s, 2 s max), the step badge follows automatically, and
-`final.chapters.txt` is ready for the YouTube description.
+`final.chapters.txt` is ready for the YouTube description. Add `group: The Easy Tips` to group
+consecutive chapters: the badge then reads "TIPS 1-5 · 1 / 3" over the group title, and cards go on
+group starts only. `output.card_style: rea` gives the white grid card (with `card_ms: 1500`).
 
 ## 3. Beats: the whole vocabulary
 Every beat: `at:` (anchor), optional `until:` (anchor, ends after that word) or `hold: 3s`.
