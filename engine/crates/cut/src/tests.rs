@@ -165,3 +165,17 @@ fn three_hours_well_under_a_second() {
     // debug build; release is ~20 ms for 4 h (see EVAL.md)
     assert!(el.as_secs_f64() < 3.0, "{el:?}");
 }
+
+#[test]
+fn review_answers_parse_in_both_formats() {
+    assert_eq!(parse_review_answer("accept: 1,3-4", 5).unwrap(), vec![0, 2, 3]);
+    assert_eq!(parse_review_answer("Sure.\naccept: none", 5).unwrap(), Vec::<usize>::new());
+    assert_eq!(parse_review_answer("accept: [r2, r5]", 5).unwrap(), vec![1, 4]);
+    assert_eq!(parse_review_answer("r1 cut\nr2 keep\n- r4 cut.", 5).unwrap(), vec![0, 3]);
+    assert!(parse_review_answer("r9 cut", 5).is_err());
+    assert!(parse_review_answer("I think so", 5).is_err());
+    // the review file says the same thing the parser accepts
+    let s = source("So now let's go. So now let's go there today.");
+    let md = review_md(&detect(&s, &CutOpts::default()), &s);
+    assert!(md.contains("accept: 1,3,7-9") && md.contains("r<n> cut"));
+}

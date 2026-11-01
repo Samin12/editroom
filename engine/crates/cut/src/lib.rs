@@ -259,7 +259,7 @@ pub fn review_md(r: &CutReport, src: &Source) -> String {
 pub fn review_md_with(r: &CutReport, src: &Source, ctx: usize) -> String {
     let w = &src.words;
     let mut s = String::new();
-    let _ = writeln!(s, "# Cut review: {} candidates. Answer one line each: `r<n> cut`, `r<n> keep`, or `r<n> cut w<a>-w<b>`.", r.review.len());
+    let _ = writeln!(s, "# Cut review: {} candidates. Answer with ONE line `accept: 1,3,7-9` (the items to cut; `accept: none`, `accept: all`), or one line per item `r<n> cut` / `r<n> keep`. Apply by hand with `cutroom cut <dir> --accept 1,3,7-9`.", r.review.len());
     s.push_str("# [[...]] is the proposed cut (an earlier attempt / stutter); the last attempt is kept.\n");
     let join = |a: usize, b: usize| w[a..b].iter().map(|x| x.text.as_str()).collect::<Vec<_>>().join(" ");
     for (n, p) in r.review.iter().enumerate() {
@@ -297,6 +297,36 @@ pub fn parse_accept(s: &str, n: usize) -> anyhow::Result<Vec<usize>> {
             anyhow::bail!("review item {part} is out of range 1..{n}");
         }
         out.extend(a - 1..b);
+    }
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
+}
+
+/// Items to accept from a review answer: an `accept: 1,3,7-9` line (`none`, `all`), or `r<n> cut`
+/// lines (`r<n> keep` and anything else is ignored). 0-based indices into `review`.
+pub fn parse_review_answer(s: &str, n: usize) -> anyhow::Result<Vec<usize>> {
+    if let Some(l) = s.lines().map(str::trim).find(|l| l.to_ascii_lowercase().starts_with("accept:")) {
+        let v = l["accept:".len()..].trim().trim_matches(|c| c == '[' || c == ']' || c == '`');
+        if v.is_empty() || v.eq_ignore_ascii_case("none") {
+            return Ok(vec![]);
+        }
+        return parse_accept(v, n);
+    }
+    let mut out = vec![];
+    for l in s.lines().map(str::trim) {
+        let mut it = l.trim_start_matches(['-', '*', ' ']).split_whitespace();
+        let (Some(id), Some(verb)) = (it.next(), it.next()) else { continue };
+        let Some(num) = id.strip_prefix('r').and_then(|x| x.trim_end_matches([':', ',']).parse::<usize>().ok()) else { continue };
+        if verb.trim_end_matches(['.', ',']).eq_ignore_ascii_case("cut") {
+            if num == 0 || num > n {
+                anyhow::bail!("review item r{num} is out of range 1..{n}");
+            }
+            out.push(num - 1);
+        }
+    }
+    if out.is_empty() && !s.lines().any(|l| l.trim().starts_with('r')) {
+        anyhow::bail!("review answer has neither an `accept:` line nor `r<n> cut` lines");
     }
     out.sort_unstable();
     out.dedup();

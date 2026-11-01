@@ -230,6 +230,13 @@ pub struct CutSpec {
     pub ms: Option<[f64; 2]>,
     #[serde(default)]
     pub why: Option<String>,
+    /// Who decided the cut: `agent` (cutroom agent's editorial pass), `human`, or none (the
+    /// detector). `cutroom cut` and `cutroom agent` regenerate their own cuts and keep `human` ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// One line for humans ("re-said at w412").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -341,6 +348,10 @@ pub enum BeatKind {
         /// Small source pill ("youtube.com", "Stripe dashboard").
         #[serde(default)]
         source: Option<String>,
+        /// A request to capture real proof into `src`. While the file is missing the beat is
+        /// pending: `check` warns, `render` refuses, `cutroom proofs` lists it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        proof: Option<ProofReq>,
     },
     /// A muted video clip (b-roll, real footage, a pre-rendered animation). `fit: card` plays it
     /// on a card in the panel, `panel` fills the panel slot, `frame` covers the whole frame under
@@ -431,6 +442,16 @@ impl VideoFit {
     pub fn loops_by_default(self) -> bool {
         self == VideoFit::Card
     }
+}
+
+/// What an `image` beat should show once someone captures it: the claim he makes and where to find
+/// the real thing.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ProofReq {
+    pub claim: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -573,6 +594,24 @@ fn expand_includes(dir: &Path, inc: &[String]) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(out)
+}
+
+/// One value as a single-line YAML flow mapping (compact JSON, which YAML reads as-is), with null
+/// fields left out. Used for machine-written spec lines (`- {"from":"w12","why":"retake"}`).
+pub fn flow<T: Serialize>(v: &T) -> String {
+    fn strip(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::Object(m) => {
+                m.retain(|_, x| !x.is_null());
+                m.values_mut().for_each(strip);
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let mut j = serde_json::to_value(v).unwrap_or(serde_json::Value::Null);
+    strip(&mut j);
+    serde_json::to_string(&j).unwrap_or_default()
 }
 
 pub fn read_spec(path: &Path) -> Result<Spec> {

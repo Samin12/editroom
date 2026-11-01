@@ -285,10 +285,10 @@ fn main() -> anyhow::Result<()> {
     push("32-number-compact", sc.base(2500.0, Some((&compact, None))));
 
     // Image.
-    let image = beat(BeatKind::Image { src: img_src.clone(), caption: Some("The campaign list pays per video".into()), highlight: Some(hl), source: Some("launchpoint.app".into()) }, 0.0, 5000.0);
+    let image = beat(BeatKind::Image { src: img_src.clone(), caption: Some("The campaign list pays per video".into()), highlight: Some(hl), source: Some("launchpoint.app".into()), proof: None }, 0.0, 5000.0);
     push("40-image-0200", sc.base(200.0, Some((&image, None))));
     push("41-image-3000", sc.base(3000.0, Some((&image, None))));
-    let missing = beat(BeatKind::Image { src: "nope/missing.png".into(), caption: None, highlight: None, source: None }, 0.0, 5000.0);
+    let missing = beat(BeatKind::Image { src: "nope/missing.png".into(), caption: None, highlight: None, source: None, proof: None }, 0.0, 5000.0);
     push("42-image-missing", sc.base(2000.0, Some((&missing, None))));
 
     // Video.

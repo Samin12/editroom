@@ -182,7 +182,7 @@ fn build(g: &Gfx, geo: &Geo, beat: &ResolvedBeat) -> Layout {
             Layout::Bullets(build_bullets(g, geo, beat, title.as_deref(), &texts))
         }
         BeatKind::Number { value, label } => Layout::Number(build_number(g, geo, value, label.as_deref())),
-        BeatKind::Image { src, caption, highlight, source } => Layout::Media(build_media(g, geo, Some(src), caption.as_deref(), *highlight, source.as_deref())),
+        BeatKind::Image { src, caption, highlight, source, .. } => Layout::Media(build_media(g, geo, Some(src), caption.as_deref(), *highlight, source.as_deref())),
         BeatKind::Video { caption, .. } => Layout::Media(build_media(g, geo, None, caption.as_deref(), None, None)),
         BeatKind::Code { text, title } => Layout::Code(build_code(g, geo, text, title.as_deref())),
         BeatKind::Quote { text, by } => Layout::Quote(build_quote(g, geo, text, by.as_deref())),

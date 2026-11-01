@@ -2,7 +2,7 @@
 
 use crate::compose::{empty_panel_ranges, Seg};
 use crate::model::Source;
-use crate::resolve::{clock, Issue, Plan, Severity};
+use crate::resolve::{clock, Issue, Plan, ResolvedBeat, Severity};
 use crate::spec::{BeatKind, EmptyPanel, Lane, LayoutMode, RectN, VideoFit};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -86,7 +86,14 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
         };
         if let Some(p) = path {
             if !spec_dir.join(p).exists() {
-                out.push(issue(Severity::Error, Some(b.start_ms), format!("{} ({}): file {p:?} not found", b.kind.name(), b.origin)));
+                match &b.kind {
+                    BeatKind::Image { proof: Some(req), .. } => out.push(issue(
+                        Severity::Warn,
+                        Some(b.start_ms),
+                        format!("image ({}): proof pending for {p:?} ({:?}); capture it or run `cutroom proofs --drop-missing` (render refuses while proofs are pending)", b.origin, req.claim),
+                    )),
+                    _ => out.push(issue(Severity::Error, Some(b.start_ms), format!("{} ({}): file {p:?} not found", b.kind.name(), b.origin))),
+                }
             }
         }
         if let BeatKind::Video { fit, caption: Some(_), .. } = &b.kind {
@@ -160,6 +167,11 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
     let _ = src;
     out.sort_by(|a, b| a.sev.cmp(&b.sev).then(a.at_ms.unwrap_or(0.0).total_cmp(&b.at_ms.unwrap_or(0.0))));
     out
+}
+
+/// Image beats with a `proof` request whose file does not exist yet.
+pub fn pending_proofs<'a>(plan: &'a Plan, spec_dir: &Path) -> Vec<&'a ResolvedBeat> {
+    plan.beats.iter().filter(|b| matches!(&b.kind, BeatKind::Image { src, proof: Some(_), .. } if !spec_dir.join(src).exists())).collect()
 }
 
 fn round_rect(r: &RectN) -> [f64; 4] {
