@@ -66,12 +66,61 @@ pub struct OutputSpec {
     /// Burn captions into the picture (an .srt is always written).
     #[serde(default)]
     pub captions: bool,
+    /// A music bed looped under the whole video, ducked under the narration.
+    #[serde(default)]
+    pub music: Option<MusicSpec>,
 }
 
 impl Default for OutputSpec {
     fn default() -> Self {
-        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false }
+        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false, music: None }
     }
+}
+
+/// `output.music`: a bed track looped to the video length, ducked while he talks, faded in at the
+/// start and out at the end, mixed before loudness normalization.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MusicSpec {
+    /// Audio file (relative to the spec's folder, or absolute).
+    pub src: String,
+    /// Level of the bed against the file's own level (dB).
+    #[serde(default = "d_music_gain")]
+    pub gain_db: f64,
+    /// Extra attenuation while narration is present (dB, positive = quieter).
+    #[serde(default = "d_music_duck")]
+    pub duck_db: f64,
+    /// How fast the bed ducks when he starts talking (ms).
+    #[serde(default = "d_music_attack")]
+    pub attack_ms: f64,
+    /// How fast it comes back after he stops (ms).
+    #[serde(default = "d_music_release")]
+    pub release_ms: f64,
+    /// Fade in at the start and out at the end of the video (ms).
+    #[serde(default = "d_music_fade")]
+    pub fade_ms: f64,
+    /// Narration level (dBFS, short-term peak) above which the bed ducks.
+    #[serde(default = "d_music_threshold")]
+    pub threshold_db: f64,
+}
+
+fn d_music_gain() -> f64 {
+    -18.0
+}
+fn d_music_duck() -> f64 {
+    12.0
+}
+fn d_music_attack() -> f64 {
+    60.0
+}
+fn d_music_release() -> f64 {
+    450.0
+}
+fn d_music_fade() -> f64 {
+    1500.0
+}
+fn d_music_threshold() -> f64 {
+    -45.0
 }
 
 fn d_height() -> u32 {

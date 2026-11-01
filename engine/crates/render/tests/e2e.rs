@@ -102,7 +102,7 @@ fn renders_synthetic_edit() {
     assert_eq!(plan.errors(), 0, "{:?}", plan.issues);
     let segs = segments(&plan, &src);
     let out = dir.join("out.mp4");
-    let opts = RenderOpts { out: out.clone(), jobs: 3, codec: Codec::VtH264, range: None, audio: true, loudnorm: false, system_gain: 0.0, work: None, quiet: true, hw_share: 0.0 };
+    let opts = RenderOpts { out: out.clone(), jobs: 3, codec: Codec::VtH264, range: None, audio: true, loudnorm: false, system_gain: 0.0, no_music: false, work: None, quiet: true, hw_share: 0.0 };
     let r = render(&plan, &src, &segs, &dir, &opts).unwrap();
     eprintln!("{r:?}");
 

@@ -14,7 +14,7 @@ pub mod outputs;
 
 use anyhow::{anyhow, Context, Result};
 use cutroom_core::compose::Seg;
-use cutroom_core::model::{Source, Track};
+use cutroom_core::model::Source;
 use cutroom_core::spec::BeatKind;
 use cutroom_core::Plan;
 pub use encode::Codec;
@@ -34,6 +34,8 @@ pub struct RenderOpts {
     pub audio: bool,
     pub loudnorm: bool,
     pub system_gain: f32,
+    /// Leave out the plan's music bed (`output.music`).
+    pub no_music: bool,
     /// Scratch folder for chunks (default: next to the output).
     pub work: Option<PathBuf>,
     pub quiet: bool,
@@ -155,14 +157,19 @@ pub fn render(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, opts: &Render
     // soundtrack in parallel with the picture
     let audio_path = work.join("audio.m4a");
     let range_ms = (f0 as f64 * 1000.0 / fps, f1 as f64 * 1000.0 / fps);
-    let has_mic = src.clips.iter().any(|c| c.track == Track::Mic);
+    let aopts = audio::AudioOpts {
+        loudnorm: opts.loudnorm,
+        system_gain: opts.system_gain,
+        music: plan.output.music.as_ref().filter(|_| !opts.no_music).map(|m| (m.clone(), dir.join(&m.src))),
+    };
+    let has_sound = opts.audio && audio::has_sound(src, &aopts);
     let (stats, audio_res): (Vec<Result<Stats>>, Result<f64>) = std::thread::scope(|s| {
         let audio = s.spawn(|| -> Result<f64> {
-            if !opts.audio || !has_mic {
+            if !has_sound {
                 return Ok(0.0);
             }
             let t = Instant::now();
-            audio::render(plan, src, range_ms, &audio_path, opts.loudnorm, opts.system_gain)?;
+            audio::render(plan, src, range_ms, &audio_path, &aopts)?;
             Ok(t.elapsed().as_secs_f64())
         });
         let handles: Vec<_> = parts
@@ -212,7 +219,7 @@ pub fn render(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, opts: &Render
     std::fs::write(&list, txt)?;
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-nostdin", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i"]).arg(&list);
-    if opts.audio && has_mic {
+    if has_sound {
         cmd.arg("-i").arg(&audio_path).args(["-map", "0:v", "-map", "1:a"]);
     }
     cmd.args(["-c", "copy", "-movflags", "+faststart"]).arg(&opts.out);

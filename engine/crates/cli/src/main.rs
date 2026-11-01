@@ -137,6 +137,9 @@ enum Cmd {
         /// Gain of system audio mixed under the mic (0 = mute).
         #[arg(long, default_value_t = 0.6)]
         system_gain: f32,
+        /// Leave out the music bed (`output.music`).
+        #[arg(long)]
+        no_music: bool,
         /// Render even when check finds errors.
         #[arg(long)]
         force: bool,
@@ -422,7 +425,7 @@ fn main() -> Result<()> {
             cutroom_render::save_png(&pm, &out)?;
             println!("{} ({} frames: {})", out.display(), times.len(), times.iter().take(40).map(|t| clock(*t)).collect::<Vec<_>>().join(" "));
         }
-        Cmd::Render { dir, out, jobs, codec, height, from, to, no_audio, loudnorm, system_gain, force, hw } => {
+        Cmd::Render { dir, out, jobs, codec, height, from, to, no_audio, loudnorm, system_gain, no_music, force, hw } => {
             let p = open(&dir, height)?;
             let segs = segments(&p.plan, &p.src);
             let issues = lint::check(&p.plan, &p.src, &segs, &p.loaded.dir, &findings(&dir));
@@ -444,6 +447,7 @@ fn main() -> Result<()> {
                 audio: !no_audio,
                 loudnorm,
                 system_gain,
+                no_music,
                 work: None,
                 quiet: false,
                 hw_share: hw,
