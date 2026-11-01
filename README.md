@@ -74,6 +74,7 @@ Measured on Samin's M5 Ultra (from `engine/README.md` and the plugin's own test 
 | chapters + 145 visuals for a 4-hour course | 186 hand-written Remotion scenes, ~2.2M tokens | 22 calls, 78 s, $1.36 |
 | render the whole 3:06 course at 1080p | ~80 min Borumi export | 12 min 11 s (15.3x realtime) |
 | render an 11-minute edit + QA | n/a | 75 s + 40 s |
+| **tips raw, end to end** (20:41 raw → 15:44 final, 64 visuals, 6 real proofs) | an evening of agents, 12 renders at once maxing the Mac | analyze 75 s ($1.23) + proof capture ~2 min (parallel) + render 68 s + QA 17 s |
 | secrets on screen | several agents, hours | 26 s per 15-min section, render blocked until blurred |
 
 ## Custom animations

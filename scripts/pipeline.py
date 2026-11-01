@@ -239,9 +239,22 @@ def pending_proofs(r):
         raise StageError(f"cutroom proofs failed; see logs/proofs.log\n{out[-800:]}")
     m = re.search(r"\[.*\]", out, re.S)
     data = json.loads(m.group(0)) if m else []
+    # a capturer already looked for this one and found nothing usable (a rerun asks again): don't
+    # send another; drop turns it into a text beat
+    data = [d for d in data if not already_failed(r.work, d)]
     with open(os.path.join(r.work, "proofs-pending.json"), "w") as f:
         json.dump(data, f, indent=1)
     return data
+
+
+def already_failed(work, req):
+    src = req.get("src") or ""
+    rec = os.path.join(work, "proof", os.path.splitext(os.path.basename(src))[0] + ".source.json")
+    try:
+        verdict = json.load(open(rec)).get("verdict")
+    except (OSError, ValueError):
+        return False
+    return verdict in ("not_found", "unsupported") and not os.path.exists(os.path.join(work, src))
 
 
 def gate_round(r, stage):
