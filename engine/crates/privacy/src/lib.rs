@@ -907,9 +907,14 @@ pub fn write_json(path: &Path, findings: &[Finding]) -> Result<()> {
 /// Blur beats for `findings`, as a YAML `beats:` list anchored to source time. Time is split at
 /// every finding edge; each piece blurs the findings on screen then, and neighbouring pieces with
 /// the same findings merge, so overlapping findings share a beat with several rects.
+/// Safety margin added to each side of a blur beat (source ms).
+pub const BLUR_PAD_MS: f64 = 50.0;
+
 pub fn propose_beats(findings: &[Finding]) -> String {
-    // start rounded down, end up, rects grown outward: a beat always covers its findings
-    let span = |f: &Finding| ((f.src0_ms / 10.0).floor() * 10.0, (f.src1_ms / 10.0).ceil() * 10.0);
+    // padded, start rounded down, end up, rects grown outward: a beat always covers its findings.
+    // The pad covers the decoder showing the NEAREST source frame (up to half a frame early or
+    // late at 24-60 fps sources) on top of the frame-exact edges.
+    let span = |f: &Finding| (((f.src0_ms - BLUR_PAD_MS).max(0.0) / 10.0).floor() * 10.0, ((f.src1_ms + BLUR_PAD_MS) / 10.0).ceil() * 10.0);
     let mut edges: Vec<f64> = findings.iter().flat_map(|f| {
         let (a, b) = span(f);
         [a, b]
@@ -1009,10 +1014,11 @@ mod tests {
         let y = propose_beats(&[finding(1000.0, 5000.0, 0.1), finding(3000.0, 8000.0, 0.5), finding(20003.0, 20996.0, 0.1)]);
         let lines: Vec<&str> = y.lines().filter(|l| l.trim_start().starts_with("- {")).collect();
         assert_eq!(lines.len(), 4, "{y}");
-        assert!(lines[0].contains(r#"at: "s:1.00", until: "s:3.00""#) && lines[0].matches('[').count() == 2, "{y}");
-        assert!(lines[1].contains(r#"at: "s:3.00", until: "s:5.00""#) && lines[1].matches('[').count() == 3, "two rects: {y}");
-        assert!(lines[2].contains(r#"at: "s:5.00", until: "s:8.00""#), "{y}");
-        assert!(lines[3].contains(r#"at: "s:20.00", until: "s:21.00""#), "rounded outward: {y}");
+        // padded by BLUR_PAD_MS on each side
+        assert!(lines[0].contains(r#"at: "s:0.95", until: "s:2.95""#) && lines[0].matches('[').count() == 2, "{y}");
+        assert!(lines[1].contains(r#"at: "s:2.95", until: "s:5.05""#) && lines[1].matches('[').count() == 3, "two rects: {y}");
+        assert!(lines[2].contains(r#"at: "s:5.05", until: "s:8.05""#), "{y}");
+        assert!(lines[3].contains(r#"at: "s:19.95", until: "s:21.05""#), "padded and rounded outward: {y}");
         assert!(lines.iter().all(|l| l.contains("kind: blur") && l.contains("lead: 0")));
         assert!(propose_beats(&[]).contains("beats: []"));
     }
