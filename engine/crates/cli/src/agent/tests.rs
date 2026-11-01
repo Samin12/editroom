@@ -194,13 +194,22 @@ fn brief_marks_ids_review_items_and_pauses() {
 
 #[test]
 fn prompts_offer_what_is_asked() {
-    let all = prompts::beats_prompt(&prompts::BeatsOpts { scenes: true, screen_pass: true, images: vec!["proof/a.png".into()], videos: vec![] });
+    let all = prompts::beats_prompt(&prompts::BeatsOpts { scenes: true, screen_pass: true, images: vec!["proof/a.png".into()], videos: vec![], glossary: Some("Honcho; Grok Bot".into()) });
     for k in ["kind: title", "kind: bullets", "kind: number", "kind: code", "kind: quote", "kind: image", "proof: {claim", "kind: scene", "proof/a.png"] {
         assert!(all.contains(k), "missing {k}");
     }
     assert!(!all.contains("kind: callout"), "the screen pass owns [screen] lines");
     let lean = prompts::beats_prompt(&prompts::BeatsOpts { scenes: false, screen_pass: false, ..Default::default() });
     assert!(!lean.contains("kind: scene"));
+    // scenes come with design rules and worked examples; every prompt that writes on-screen text
+    // carries the names rule
+    for k in ["Fill the panel", "type: arrow, from:", "style: marker", "type: counter", "keys: [{t:"] {
+        assert!(all.contains(k), "scene guide misses {k}");
+    }
+    assert!(!lean.contains("Fill the panel"));
+    assert!(all.contains("glossary: Honcho; Grok Bot.") && lean.contains("misspells"));
+    assert!(prompts::chapter_prompt(Some("Honcho")).contains("glossary: Honcho."));
+    assert!(prompts::SCENE_GUIDE.matches("kind: scene").count() >= 3);
     assert!(lean.contains("kind: callout"));
     assert!(prompts::system(Some("Never say guys.")).ends_with("Never say guys."));
     assert_eq!(prompts::system(Some("  ")), prompts::SYSTEM);
@@ -322,11 +331,16 @@ fn stash_moves_generated_beat_files_only() {
     for f in ["00-chapters.yaml", "ch01.yaml", "ch12.yaml", "screen.yaml", "privacy.yaml", "chapter-notes.yaml"] {
         std::fs::write(dir.join("beats").join(f), "beats: []\n").unwrap();
     }
-    stash_previous(&dir, &dir.join("agent")).unwrap();
-    let left: Vec<String> = std::fs::read_dir(dir.join("beats")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-    let mut left = left;
-    left.sort();
-    assert_eq!(left, vec!["chapter-notes.yaml", "privacy.yaml"]);
+    let left = |d: &Path| {
+        let mut v: Vec<String> = std::fs::read_dir(d.join("beats")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    };
+    // without a screen pass, its old marks stay
+    stash_previous(&dir, &dir.join("agent"), false).unwrap();
+    assert_eq!(left(&dir), vec!["chapter-notes.yaml", "privacy.yaml", "screen.yaml"]);
+    stash_previous(&dir, &dir.join("agent"), true).unwrap();
+    assert_eq!(left(&dir), vec!["chapter-notes.yaml", "privacy.yaml"]);
 }
 
 #[test]
@@ -384,4 +398,26 @@ fn micro_cuts_are_left_out() {
     let r = editorial::validate("cuts:\n  - {from: w20, to: w20, why: filler}\n  - {from: w21, to: w22, why: filler}\n", &ch, &c, &CutReport::default(), &normw(&src));
     assert_eq!(r.cuts.iter().map(|x| x.from).collect::<Vec<_>>(), vec![21]);
     assert!(r.errors.is_empty());
+}
+
+#[test]
+fn names_glossary_reads_the_names_section_of_style_md() {
+    let style = "# Creator style\n\nCuts\n- keep the last take\n\nNames\n- Honcho (memory layer), not Hancho\n- Grok Bot\n  - spelled with a space\n\nVisuals\n- big numbers\n";
+    assert_eq!(prompts::names_glossary(Some(style)).as_deref(), Some("Honcho (memory layer), not Hancho; Grok Bot; spelled with a space"));
+    assert_eq!(prompts::names_glossary(Some("## Names:\n- T3 Code\n## Other\n- x\n")).as_deref(), Some("T3 Code"));
+    assert_eq!(prompts::names_glossary(Some("Cuts\n- a\n")), None);
+    assert_eq!(prompts::names_glossary(Some("Names (correct spellings)\n- Honcho\n")).as_deref(), Some("Honcho"));
+    assert_eq!(prompts::names_glossary(Some("- Names are hard\n- x\n")), None);
+    assert_eq!(prompts::names_glossary(None), None);
+}
+
+#[test]
+fn screen_prompt_carries_the_names_rule() {
+    let src = source(TEXT);
+    let dir = work("screen-names", &src);
+    let (src, plan) = plan_of(&dir);
+    let c = Ctx::new(&src, &plan);
+    let w = screen::Window { k: 0, lo: c.pos_at_or_after(25), hi: c.kept.len(), frames: vec![] };
+    let p = screen::prompt(&c, &w, Some("Claude Code"));
+    assert!(p.contains("glossary: Claude Code.") && p.contains("never put a misspelled transcript word on screen"));
 }

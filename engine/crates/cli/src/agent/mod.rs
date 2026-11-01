@@ -53,12 +53,14 @@ pub struct AgentOpts {
     pub scenes: bool,
     /// Chapters and visuals (false: cuts only).
     pub beats: bool,
+    /// Regenerate the cuts (false: keep cuts.yaml and review.md as they are).
+    pub cuts: bool,
     pub chunk_words: usize,
 }
 
 impl Default for AgentOpts {
     fn default() -> Self {
-        AgentOpts { model: "sonnet".into(), cut_model: "opus".into(), screen_model: "sonnet".into(), jobs: 8, review: true, editorial: true, screen: true, scenes: true, beats: true, chunk_words: 1500 }
+        AgentOpts { model: "sonnet".into(), cut_model: "opus".into(), screen_model: "sonnet".into(), jobs: 8, review: true, editorial: true, screen: true, scenes: true, beats: true, cuts: true, chunk_words: 1500 }
     }
 }
 
@@ -131,15 +133,16 @@ fn cuts_file(report: &CutReport, ed: &[editorial::EdCut], human: &[CutSpec]) -> 
     s
 }
 
-/// Move the previous run's generated files out of the way (never deleted).
-fn stash_previous(dir: &Path, log: &Path) -> Result<()> {
+/// Move the previous run's generated files out of the way (never deleted). `screen.yaml` only moves
+/// when the screen pass will write a new one.
+fn stash_previous(dir: &Path, log: &Path, screen: bool) -> Result<()> {
     let beats = dir.join("beats");
     let Ok(rd) = std::fs::read_dir(&beats) else { return Ok(()) };
     let old: Vec<PathBuf> = rd
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
             let n = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            n == "00-chapters.yaml" || n == "screen.yaml" || (n.starts_with("ch") && n.ends_with(".yaml") && n[2..n.len() - 5].chars().all(|c| c.is_ascii_digit()))
+            n == "00-chapters.yaml" || (screen && n == "screen.yaml") || (n.starts_with("ch") && n.ends_with(".yaml") && n[2..n.len() - 5].chars().all(|c| c.is_ascii_digit()))
         })
         .collect();
     if old.is_empty() {
@@ -309,10 +312,32 @@ pub fn run(dir: &Path, o: &AgentOpts) -> Result<Usage> {
     let llm = Llm::new(prompts::system(style.as_deref()));
     let mut rep = RunReport::default();
     if o.beats {
-        stash_previous(dir, &log)?;
+        stash_previous(dir, &log, o.screen)?;
     }
 
     // ---- 1. cuts ----
+    if o.cuts {
+        run_cuts(dir, o, &llm, &log, &mut rep)?;
+    }
+
+    // ---- 2. chapters + visuals, and the screen pass alongside ----
+    visuals(dir, o, &llm, &log, &mut rep)?;
+
+    for u in rep.passes.values() {
+        rep.total.add(u);
+    }
+    rep.total.wall_s = t0.elapsed().as_secs_f64();
+    for (k, u) in &rep.passes {
+        eprintln!("  {k:<9} {:>3} calls  {:>8} in  {:>6} out  ${:.3}  {:.0}s", u.calls, u.total_in(), u.output, u.cost_usd, u.wall_s);
+    }
+    if o.beats {
+        eprintln!("beats {:?}; {} screen marks; {} dropped (agent/dropped.yaml); {} proofs pending (`cutroom proofs`)", rep.beats, rep.screen_marks, rep.dropped, rep.pending_proofs);
+    }
+    std::fs::write(log.join("usage.json"), serde_json::to_string_pretty(&rep)?)?;
+    Ok(rep.total)
+}
+
+fn run_cuts(dir: &Path, o: &AgentOpts, llm: &Llm, log: &Path, rep: &mut RunReport) -> Result<()> {
     let tc = Instant::now();
     let (_, src, _) = load(dir)?;
     let human = kept_cuts(dir, false);
@@ -342,7 +367,7 @@ pub fn run(dir: &Path, o: &AgentOpts) -> Result<Usage> {
         let normw: Vec<String> = src1.words.iter().map(|w| norm(&w.text)).collect();
         let chunks = editorial::chunks(&c.kept, o.chunk_words, o.chunk_words * 15 / 100);
         eprintln!("cuts: detector {} cuts ({}), {} unsure; editorial pass over {} chunks with {}", report.auto.len(), clock(rep.cuts.detector_s * 1000.0), report.review.len(), chunks.len(), o.cut_model);
-        let results = par_map(chunks, o.jobs, |ch| run_chunk(&llm, o, &c, &ch, &report, &marks, &normw, &log));
+        let results = par_map(chunks, o.jobs, |ch| run_chunk(llm, o, &c, &ch, &report, &marks, &normw, log));
         let mut u = Usage::default();
         let mut all = vec![];
         for r in results {
@@ -390,15 +415,17 @@ pub fn run(dir: &Path, o: &AgentOpts) -> Result<Usage> {
         rep.cuts.pauses_kept,
         tc.elapsed().as_secs_f64()
     );
+    Ok(())
+}
 
-    // ---- 2. chapters + visuals, and the screen pass alongside ----
+fn visuals(dir: &Path, o: &AgentOpts, llm: &Llm, log: &Path, rep: &mut RunReport) -> Result<()> {
     if o.beats {
         let (base, src, plan) = load(dir)?;
         let c = Ctx::new(&src, &plan);
         let segs = segments(&plan, &src);
         let (vis, scr) = std::thread::scope(|s| {
-            let scr = s.spawn(|| if o.screen { screen_pass(&llm, o, dir, &log, &base, &src, &c, &segs) } else { Ok(ScreenOut::default()) });
-            let vis = chapters_and_visuals(&llm, o, dir, &log, &base, &src, &c);
+            let scr = s.spawn(|| if o.screen { screen_pass(llm, o, dir, log, &base, &src, &c, &segs) } else { Ok(ScreenOut::default()) });
+            let vis = chapters_and_visuals(llm, o, dir, log, &base, &src, &c);
             (vis, scr.join().map_err(|_| anyhow!("screen pass panicked")).and_then(|r| r))
         });
         let mut dropped = vec![];
@@ -428,19 +455,7 @@ pub fn run(dir: &Path, o: &AgentOpts) -> Result<Usage> {
         }
         rep.pending_proofs = lint::pending_proofs(&plan, &loaded.dir).len();
     }
-
-    for u in rep.passes.values() {
-        rep.total.add(u);
-    }
-    rep.total.wall_s = t0.elapsed().as_secs_f64();
-    for (k, u) in &rep.passes {
-        eprintln!("  {k:<9} {:>3} calls  {:>8} in  {:>6} out  ${:.3}  {:.0}s", u.calls, u.total_in(), u.output, u.cost_usd, u.wall_s);
-    }
-    if o.beats {
-        eprintln!("beats {:?}; {} screen marks; {} dropped (agent/dropped.yaml); {} proofs pending (`cutroom proofs`)", rep.beats, rep.screen_marks, rep.dropped, rep.pending_proofs);
-    }
-    std::fs::write(log.join("usage.json"), serde_json::to_string_pretty(&rep)?)?;
-    Ok(rep.total)
+    Ok(())
 }
 
 struct VisOut {
@@ -454,7 +469,8 @@ fn chapters_and_visuals(llm: &Llm, o: &AgentOpts, dir: &Path, log: &Path, base: 
     let n = c.kept.len();
     let whole = brief::brief(c, 0, n, 0, None, 45);
     let chapters_file = "beats/00-chapters.yaml";
-    let mut ch = write_validated(llm, &o.model, &format!("{}{whole}", prompts::CHAPTER_PROMPT), dir, chapters_file, None, base, src, None, log, "chapters")?;
+    let glossary = prompts::names_glossary(std::fs::read_to_string(dir.join("style.md")).ok().as_deref());
+    let mut ch = write_validated(llm, &o.model, &format!("{}{whole}", prompts::chapter_prompt(glossary.as_deref())), dir, chapters_file, None, base, src, None, log, "chapters")?;
     ch.usage.wall_s = t.elapsed().as_secs_f64();
     let mut dropped = ch.dropped;
     eprintln!("chapters: {} ({:.0}s)", ch.items, ch.usage.wall_s);
@@ -472,7 +488,7 @@ fn chapters_and_visuals(llm: &Llm, o: &AgentOpts, dir: &Path, log: &Path, base: 
     // visuals per chapter, validated against the edit with chapters in it
     let (base, _, _) = load(dir)?;
     let (images, videos) = list_assets(dir);
-    let bp = prompts::beats_prompt(&prompts::BeatsOpts { scenes: o.scenes, screen_pass: o.screen, images, videos });
+    let bp = prompts::beats_prompt(&prompts::BeatsOpts { scenes: o.scenes, screen_pass: o.screen, images, videos, glossary });
     let tv = Instant::now();
     let res = par_map(ranges, o.jobs, |(i, a, b)| {
         let text = brief::brief(c, a, b, 6, None, 40);
@@ -513,6 +529,7 @@ fn screen_pass(llm: &Llm, o: &AgentOpts, dir: &Path, log: &Path, base: &Loaded, 
         eprintln!("screen: {} stretches; looking at the first {MAX_WINDOWS}", wins.len());
         wins.truncate(MAX_WINDOWS);
     }
+    let glossary = prompts::names_glossary(std::fs::read_to_string(dir.join("style.md")).ok().as_deref());
     let frames_dir = log.join("frames");
     std::fs::create_dir_all(&frames_dir)?;
     eprintln!("screen: {} stretches with {}", wins.len(), o.screen_model);
@@ -533,7 +550,7 @@ fn screen_pass(llm: &Llm, o: &AgentOpts, dir: &Path, log: &Path, base: &Loaded, 
             return Ok((vec![], vec![], Usage::default()));
         }
         let w = screen::Window { frames: kept_frames, ..w };
-        let (ans, u) = llm.ask(&o.screen_model, &screen::prompt(c, &w), &imgs, &log.join(format!("screen-{:03}.json", w.k + 1)))?;
+        let (ans, u) = llm.ask(&o.screen_model, &screen::prompt(c, &w, glossary.as_deref()), &imgs, &log.join(format!("screen-{:03}.json", w.k + 1)))?;
         let l = beats::parse_lenient(&ans).map_err(|e| anyhow!("screen {:03}: unreadable answer: {e}", w.k + 1))?;
         let mut dropped: Vec<Dropped> = l.bad.into_iter().map(|(item, why)| Dropped { file: file.into(), item, why }).collect();
         let (ok, bad) = screen::check_marks(c, &w, l.beats);

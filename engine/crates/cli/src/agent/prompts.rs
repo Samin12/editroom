@@ -10,6 +10,41 @@ pub fn system(style: Option<&str>) -> String {
     }
 }
 
+/// The "Names" section of `style.md`: correct spellings of people, products and tools.
+pub fn names_glossary(style: Option<&str>) -> Option<String> {
+    let s = style?;
+    let mut out = vec![];
+    let mut on = false;
+    for line in s.lines() {
+        let t = line.trim();
+        let bare = t.trim_start_matches('#').trim().trim_end_matches(':');
+        if !on {
+            on = !t.starts_with(['-', '*', '+']) && bare.split(|c: char| !c.is_alphanumeric()).next().is_some_and(|w| w.eq_ignore_ascii_case("names"));
+            continue;
+        }
+        let item = line.starts_with([' ', '\t']) || t.starts_with(['-', '*', '+']) || t.is_empty();
+        if !item {
+            break;
+        }
+        if !t.is_empty() {
+            out.push(t.trim_start_matches(['-', '*', '+']).trim().to_string());
+        }
+    }
+    (!out.is_empty()).then(|| out.join("; "))
+}
+
+/// The names rule, plus the glossary when there is one. Shared by every prompt that puts text on
+/// screen.
+pub fn names_rule(glossary: Option<&str>) -> String {
+    let mut s = String::from("- Names: the transcript is speech-to-text and misspells people, products and tools (\"Hancho\" is Honcho, \"Grockbot\" is Grok Bot, \"Cloud Code\" is Claude Code). Correct every name from context");
+    match glossary {
+        Some(g) => s.push_str(&format!(" and from this glossary: {g}.")),
+        None => s.push('.'),
+    }
+    s.push_str(" Every word you put on screen (titles, labels, captions, chapter titles, callouts) uses the correct spelling; never put a misspelled transcript word on screen.\n");
+    s
+}
+
 /// How the transcripts below are written; shared by every pass that reads one.
 pub const TRANSCRIPT_KEY: &str = "Transcript format: one line per sentence. Each line starts with the id of its first word and [talk] (he is on camera, the panel next to him is empty) or [screen] (his screen recording is showing). A `wN` marker every few words gives exact ids: the word right after `w812` is w812, the next one w813, and so on.";
 
@@ -55,7 +90,12 @@ pub fn fix(prompt: &str, answer: &str, errors: &[String]) -> String {
 
 pub const REVIEW_PROMPT: &str = "These are ambiguous cut candidates from a raw recording. [[...]] marks the proposed cut: an earlier attempt, a stutter or a restart; he always keeps the LAST attempt. Cut it when the bracketed words are said again right after (a retake), are a false start, or are a broken half sentence. Keep it when cutting would drop meaning that is not repeated, or the repetition is intentional emphasis.\n\nAnswer with ONE line: `accept: <numbers>` listing the items to cut, as comma-separated numbers and ranges (e.g. `accept: 1,3,7-9`), or `accept: none`.\n\n";
 
-pub const CHAPTER_PROMPT: &str = "Split this video into YouTube chapters (one per real topic change; roughly every 3 to 12 minutes; the first chapter starts at the first line). Titles: 2 to 5 words in Title Case, his own wording, no em dashes, no numbering, never \"Level N\" or \"Part N\". `short`: 1 to 2 words for an on-screen badge.\n\nAnswer with YAML only, in exactly this shape (`at` = the word id that starts the chapter's first line):\nchapters:\n  - {at: w0, title: Why YouTube Matters, short: Why}\n\nTranscript (word id, [talk] on camera or [screen] demo, sentence):\n";
+pub fn chapter_prompt(glossary: Option<&str>) -> String {
+    format!(
+        "Split this video into YouTube chapters (one per real topic change; roughly every 3 to 12 minutes; the first chapter starts at the first line). Titles: 2 to 5 words in Title Case, his own wording, no em dashes, no numbering, never \"Level N\" or \"Part N\". `short`: 1 to 2 words for an on-screen badge.\n{}\nAnswer with YAML only, in exactly this shape (`at` = the word id that starts the chapter's first line):\nchapters:\n  - {{at: w0, title: Why YouTube Matters, short: Why}}\n\nTranscript (word id, [talk] on camera or [screen] demo, sentence):\n",
+        names_rule(glossary)
+    )
+}
 
 /// What the visuals prompt may offer.
 #[derive(Clone, Debug, Default)]
@@ -68,6 +108,8 @@ pub struct BeatsOpts {
     pub images: Vec<String>,
     /// Existing video clips (relative) for `video` beats.
     pub videos: Vec<String>,
+    /// Correct spellings from style.md ("Names").
+    pub glossary: Option<String>,
 }
 
 pub fn beats_prompt(o: &BeatsOpts) -> String {
@@ -87,9 +129,7 @@ pub fn beats_prompt(o: &BeatsOpts) -> String {
         }
     }
     if o.scenes {
-        s.push_str(
-            "- {at: wN, until: wM, kind: scene, layers: [...]}   a CUSTOM animation for the 1 to 3 moments per chapter that deserve more than a template: a process, a comparison, a before/after, how things connect. Layer coordinates are 0..1 inside the panel:\n    {id: head, type: text, text: \"Claude *talks to* Poppy\", x: 0.5, y: 0.14, size: 64, weight: bold, align: center}\n    {id: a, type: box, x: 0.08, y: 0.38, w: 0.32, h: 0.26, radius: 24, fill: card, stroke: accent, label: \"Claude\", in: {at: wN, from: left}}\n    {type: arrow, from: [0.40, 0.51], to: [0.60, 0.51], color: accent, width: 6, in: {at: wN, draw: true}}\n    {type: counter, from: 0, to: 10075, prefix: \"$\", x: 0.5, y: 0.82, size: 72, in: {at: wN}}\n    also circle, line, image (src), code, highlight. Each layer enters on its own word (`in: {at: wN, from: up|down|left|right|fade|scale|pop}`) so it builds while he talks. Colours: accent, ink, muted, card, green, red, gold or #hex. Keep a scene to 3 to 8 layers.\n",
-        );
+        s.push_str("- {at: wN, until: wM, kind: scene, layers: [...]}   a CUSTOM animation for the 1 to 3 moments per chapter that deserve more than a template: a process, a comparison, a hierarchy, how things connect. Rules and examples below.\n");
     }
     if !o.screen_pass {
         s.push_str("- {at: wN, kind: callout, text: \"...\"}   a 2 to 4 word pill; the only kind allowed on [screen] lines\n");
@@ -101,12 +141,82 @@ pub fn beats_prompt(o: &BeatsOpts) -> String {
         s.push_str(" Leave [screen] lines alone: another pass marks up the screen.");
     }
     s.push_str(
-        "\n- One idea per beat, 3 to 8 s on screen, never overlapping, at most one beat per ~15 s of talk, none while he is only chatting. Nothing static for more than ~4 s: lists reveal item by item, scenes build layer by layer.\n- Anchor a beat on the word where the idea starts (it lands just before he says it) and `until` the word where the idea ends.\n- Headlines in his own words, under 7 words, no em dashes.\n- Fewer, stronger beats beat many; a chapter of pure chatting gets none.\n\nAnswer with YAML only, one line per beat:\nbeats:\n  - {at: w123, until: w140, kind: title, text: \"...\"}\n\n",
+        "\n- One idea per beat, 3 to 8 s on screen, never overlapping, at most one beat per ~15 s of talk, none while he is only chatting. Nothing static for more than ~4 s: lists reveal item by item, scenes build layer by layer.\n- Anchor a beat on the word where the idea starts (it lands just before he says it) and `until` the word where the idea ends.\n- Headlines in his own words, under 7 words, no em dashes.\n- Fewer, stronger beats beat many; a chapter of pure chatting gets none.\n",
     );
+    s.push_str(&names_rule(o.glossary.as_deref()));
+    if o.scenes {
+        s.push_str(SCENE_GUIDE);
+    }
+    s.push_str("\nAnswer with YAML only, one line per beat (a scene may span several lines):\nbeats:\n  - {at: w123, until: w140, kind: title, text: \"...\"}\n\n");
     s.push_str(TRANSCRIPT_KEY);
     s.push_str("\n\nChapter transcript:\n");
     s
 }
+
+/// How to make a `scene` look designed rather than like a wireframe, with worked examples.
+pub const SCENE_GUIDE: &str = r#"
+SCENES must look designed, not like a wireframe:
+- Fill the panel: content spans 70 to 90% of it. Margins 0.05; heading at y 0.07; content from y 0.25 to 0.9. Boxes are big: two side by side are w 0.42 each (x 0.05 and 0.53); three in a row are w 0.27 (x 0.05, 0.365, 0.68); h 0.18 to 0.6.
+- Type scale (units of a 1920-wide panel): heading `size` 88 to 100, bold. Box labels `size` 52 to 60 (a box's `sub` is drawn at 0.56 of that, so 30 to 34). Free text 36 to 56. Counters 150 to 180. Labels 1 to 3 words, subs 2 to 5 words.
+- Connect what relates: give boxes and circles an `id` and draw `{type: arrow, from: <id>, to: <id>}` between them, entering on the word that links them. A hierarchy, a flow or a hub always has arrows.
+- One payoff per scene, picked by content: he says a number, so a big `counter`; he names a real page, post or product AND a matching file is in the list above, so that `image` with `ring` on the key detail (only listed files; never invent a path); otherwise a heading with `style: marker` (marks its *accent* words). Vary it: not the same payoff in every scene.
+- Use the whole height: content runs from y 0.25 to 0.9. One row of boxes means tall boxes (h 0.45 to 0.6) or a big element in the middle; never a band of small boxes with empty space above.
+- Pick the shape his words describe: a comparison (two big cards), a hub (many into one), a hierarchy (one over many), a stack ("layers", "built on top of": bars bottom-up), a flow (A to B to C left to right), a stat beside its proof. Every box says something specific from his words; never several boxes with the same label.
+- Build it on his words: every layer gets `in: {at: wN}` on the word that introduces it, at least 3 different words across the scene. The key element enters with `from: pop`.
+- Finish early: the last layer (arrows included) enters at least 2 s (about 6 words) before `until`, so the finished picture holds while he talks about it. Set `until` on the word where he moves on, not on the last word you animate.
+- Keep it moving: give the payoff a slow push-in, `keys: [{t: wN, ms: 4000, scale: 1.06}]`, so nothing sits still for more than about 4 s.
+- Emphasis: the one element that matters gets `fill: accent_soft, stroke: accent, width: 4`; the rest stay plain (`fill: card2`). 4 to 9 layers. Coordinates are 0..1 of the panel from its top-left; text `x` is its centre with `align: center`.
+
+Example, a comparison with the numbers as the payoff:
+  - {at: w1200, until: w1226, kind: scene, layers: [
+      {type: text, text: "By hand vs *with agents*", x: 0.06, y: 0.07, size: 96, weight: bold},
+      {type: box, x: 0.05, y: 0.25, w: 0.42, h: 0.55, fill: card2, in: {at: w1202, from: left}},
+      {type: text, text: "By hand", x: 0.26, y: 0.31, size: 56, weight: semibold, align: center, in: {at: w1202}},
+      {type: counter, from: 0, to: 6, suffix: " h", x: 0.26, y: 0.43, size: 170, color: ink_soft, in: {at: w1206}},
+      {type: text, text: "per video", x: 0.26, y: 0.66, size: 36, align: center, color: muted, in: {at: w1207}},
+      {type: box, x: 0.53, y: 0.25, w: 0.42, h: 0.55, fill: accent_soft, stroke: accent, width: 4, in: {at: w1219, from: right}},
+      {type: text, text: "*With agents*", x: 0.74, y: 0.31, size: 56, weight: semibold, align: center, in: {at: w1219}},
+      {type: counter, from: 60, to: 20, suffix: " min", x: 0.74, y: 0.43, size: 170, in: {at: w1223}, keys: [{t: w1224, ms: 3000, scale: 1.08}]},
+      {type: text, text: "per video", x: 0.74, y: 0.66, size: 36, align: center, color: muted, in: {at: w1224}}]}
+
+Example, a hub: many things feeding one:
+  - {at: w2400, until: w2415, kind: scene, layers: [
+      {type: text, text: "One *inbox* for everything", x: 0.06, y: 0.07, size: 92, weight: bold, style: marker},
+      {id: hub, type: circle, x: 0.5, y: 0.44, r: 0.15, fill: accent_soft, stroke: accent, width: 5, label: "Your agent", size: 56, in: {at: w2400, from: pop}, keys: [{t: w2410, ms: 4000, scale: 1.05}]},
+      {id: a, type: box, x: 0.05, y: 0.72, w: 0.27, h: 0.17, label: Gmail, size: 52, in: {at: w2405}},
+      {id: b, type: box, x: 0.365, y: 0.72, w: 0.27, h: 0.17, label: Slack, size: 52, in: {at: w2406}},
+      {id: c, type: box, x: 0.68, y: 0.72, w: 0.27, h: 0.17, label: X, size: 52, in: {at: w2408}},
+      {type: arrow, from: a, to: hub, in: {at: w2411}},
+      {type: arrow, from: b, to: hub, in: {at: w2412}},
+      {type: arrow, from: c, to: hub, in: {at: w2413}}]}
+
+Example, a hierarchy: one thing directing others:
+  - {at: w3500, until: w3549, kind: scene, layers: [
+      {type: text, text: "The *planner* runs the team", x: 0.06, y: 0.07, size: 92, weight: bold, style: marker},
+      {id: boss, type: box, x: 0.25, y: 0.27, w: 0.5, h: 0.22, fill: accent_soft, stroke: accent, width: 4, label: Planner, sub: "splits the work", size: 58, in: {at: w3503, from: pop}, keys: [{t: w3530, ms: 4000, scale: 1.04}]},
+      {id: w1, type: box, x: 0.05, y: 0.66, w: 0.27, h: 0.2, label: Researcher, sub: "finds sources", size: 52, in: {at: w3511}},
+      {id: w2, type: box, x: 0.365, y: 0.66, w: 0.27, h: 0.2, label: Writer, sub: "drafts the script", size: 52, in: {at: w3514}},
+      {id: w3, type: box, x: 0.68, y: 0.66, w: 0.27, h: 0.2, label: Editor, sub: "cuts the video", size: 52, in: {at: w3517}},
+      {type: arrow, from: boss, to: w1, in: {at: w3511}},
+      {type: arrow, from: boss, to: w2, in: {at: w3514}},
+      {type: arrow, from: boss, to: w3, in: {at: w3517}}]}
+Example, a stack built bottom-up:
+  - {at: w4100, until: w4140, kind: scene, layers: [
+      {type: text, text: "Four layers, one *system*", x: 0.06, y: 0.07, size: 92, weight: bold, style: marker},
+      {type: box, x: 0.1, y: 0.74, w: 0.8, h: 0.15, label: Context, sub: "who you are", size: 52, in: {at: w4102, from: up}},
+      {type: box, x: 0.1, y: 0.565, w: 0.8, h: 0.15, label: Connectors, sub: "your apps", size: 52, in: {at: w4106, from: up}},
+      {type: box, x: 0.1, y: 0.39, w: 0.8, h: 0.15, label: Skills, sub: "how you work", size: 52, in: {at: w4110, from: up}},
+      {type: box, x: 0.1, y: 0.215, w: 0.8, h: 0.15, fill: accent_soft, stroke: accent, width: 4, label: "*Routines*", sub: "runs while you sleep", size: 52, in: {at: w4114, from: pop}, keys: [{t: w4118, ms: 4000, scale: 1.04}]}]}
+
+Example, a stat beside its proof (the file must be one listed above):
+  - {at: w5200, until: w5230, kind: scene, layers: [
+      {type: image, src: proof/launchpoint-rates.png, x: 0.05, y: 0.12, w: 0.56, h: 0.76, source: "launchpoint.app", ring: [0.05, 0.2, 0.4, 0.1], in: {at: w5200, from: scale}, keys: [{t: w5203, ms: 4500, scale: 1.05}]},
+      {type: text, text: "PAID FOR ONE VIDEO", x: 0.65, y: 0.3, size: 32, weight: bold, color: accent, in: {at: w5204}},
+      {type: counter, to: 10075, prefix: "$", x: 0.65, y: 0.36, size: 140, align: left, in: {at: w5206}},
+      {type: text, text: "LaunchPoint's rate for *one* AI video", x: 0.65, y: 0.58, w: 0.3, size: 40, color: ink_soft, in: {at: w5209}}]}
+
+Other layer types: {type: line, points: [[x, y], ...]}, {type: image, src: <file>, x, y, w, h, ring: [x, y, w, h]}, {type: code, text: "...", x, y, w}, {type: highlight, x, y, w, h, style: marker} (list it before the layer it sits behind). Colours: accent, accent_soft, ink, ink_soft, muted, card, card2, green, red, gold or #hex.
+"#;
 
 pub const SCREEN_PROMPT: &str = r#"The images are frames of his screen recording while he says the lines below. Mark up the screen so the viewer looks exactly where he means:
 - {at: wN, until: wM, kind: ring, rect: [x, y, w, h]}         circle the thing he names or clicks (a button, a field, a number)

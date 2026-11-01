@@ -30,3 +30,11 @@ Visuals
   becomes "can't"), never a number or name he did not say or a source does not support.
 - Never show the price of his paid community (Claude Club); show the community itself.
 - Nothing static for more than about 4 seconds; at least 2 seconds per beat.
+
+Names (correct spellings; speech-to-text gets these wrong, and on-screen text must not)
+- Claude, Claude Code, Opus, Sonnet, Haiku (Anthropic); never "Cloud Code"
+- Honcho (memory layer); never "Hancho"
+- Grok, Grok Bot; never "Grockbot"
+- Hermes, Codex, T3 Code, ChatGPT, OpenAI
+- Borumi, Poppy, Heptabase, Higgsfield, Composio
+- Skool, Claude Club, AI Answers
