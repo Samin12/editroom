@@ -1,0 +1,10 @@
+# A big stat that counts up next to its proof: the screenshot pushes in and a ring + spotlight
+# lands on the number in it (the ring follows the push-in).
+kind: scene
+layers:
+  - {type: image, src: shot.png, x: 0.05, y: 0.12, w: 0.54, h: 0.66, source: launchpoint.app, ring: [0.045, 0.205, 0.18, 0.1],
+     in: {from: scale, ms: 500}, keys: [{t: "+0.5s", ms: 4500, scale: 1.05}], ease: in_out}
+  - {type: text, text: "PAID FOR ONE VIDEO", x: 0.645, y: 0.25, size: 30, weight: bold, color: accent, in: {at: "+0.4s"}}
+  - {type: counter, to: 10075, prefix: "$", x: 0.64, y: 0.31, size: 132, align: left, in: {at: "+0.5s"}}
+  - {type: highlight, x: 0.645, y: 0.455, w: 0.2, h: 0.012, style: underline, in: {at: "+1.6s"}}
+  - {type: text, text: "LaunchPoint's *campaign* rate for a single AI video", x: 0.645, y: 0.51, w: 0.31, size: 38, weight: regular, color: ink_soft, in: {at: "+1s"}}

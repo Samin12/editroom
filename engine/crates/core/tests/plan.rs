@@ -90,3 +90,51 @@ fn typos_are_rejected() {
     let r: Result<spec::Spec, _> = serde_yaml::from_str("beats:\n  - {at: w1, kind: titel, text: hi}\n");
     assert!(r.is_err());
 }
+
+#[test]
+fn scene_layers_follow_words_through_cuts() {
+    let (plan, _src, dir) = plan_for(
+        r#"
+cuts:
+  - {from: w0, to: w8, why: retake}
+beats:
+  - at: "connect claude to poppy"
+    until: "the board."
+    kind: scene
+    layers:
+      - {type: text, text: "Claude + Poppy", x: 0.1, y: 0.1, in: {at: "poppy"}}
+      - {id: a, type: box, x: 0.1, y: 0.4, w: 0.3, h: 0.2, in: {at: w16}, keys: [{t: "+1s", scale: 1.1}]}
+      - {type: arrow, from: a, to: [0.9, 0.5], in: {at: "open"}}
+      - {type: text, text: "late", x: 0.1, y: 0.8, in: {at: "that is it."}}
+      - {type: image, src: nope.png, x: 0.5, y: 0.1, w: 0.3, h: 0.3}
+"#,
+    );
+    let b = &plan.beats[0];
+    let cutroom_core::spec::BeatKind::Scene { layers, .. } = &b.kind else { panic!() };
+    let t = cutroom_core::scene::unflatten(layers, &b.items_ms);
+    let out = |id: usize| plan.words.iter().find(|w| w.id == id).unwrap().start_ms - 130.0;
+    // "poppy" matches the kept take said during the beat (w14), not the cut one (w6)
+    assert!((t[0].enter.unwrap() - out(14)).abs() < 1e-6, "{t:?}");
+    assert!((t[1].enter.unwrap() - out(16)).abs() < 1e-6);
+    assert!((t[1].keys[0] - (b.start_ms + 1000.0)).abs() < 1e-6);
+    assert!((t[2].enter.unwrap() - out(16)).abs() < 1e-6);
+    // said after the beat: clamped to its end, with a warning
+    assert!((t[3].enter.unwrap() - b.end_ms).abs() < 1e-6);
+    assert!(plan.issues.iter().any(|i| i.sev == Severity::Warn && i.msg.contains("layer 3") && i.msg.contains("after the beat")), "{:?}", plan.issues);
+    assert_eq!(plan.errors(), 0, "{:?}", plan.issues);
+    // `check` lints the layers: the missing image is an error naming the file
+    let src = source();
+    let segs = segments(&plan, &src);
+    let issues = check(&plan, &src, &segs, &dir, &[]);
+    assert!(issues.iter().any(|i| i.sev == Severity::Error && i.msg.contains("scene (edit-") && i.msg.contains("nope.png")), "{issues:?}");
+}
+
+#[test]
+fn bad_scene_layers_fail_to_load() {
+    let dir = std::env::temp_dir().join(format!("cutroom-core-scene-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("edit.yaml");
+    std::fs::write(&p, "beats:\n  - {at: w1, kind: scene, layers: [{type: text, text: hi, x: 0, y: 0, colour: red}]}\n").unwrap();
+    let e = spec::load(&p).unwrap_err().to_string();
+    assert!(e.contains("colour"), "{e}");
+}

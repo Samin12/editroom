@@ -1,0 +1,7 @@
+# A prompt that types on; a marker sweeps behind the accent words of the headline.
+kind: scene
+layers:
+  - {type: text, text: "Paste *one line*. That's it.", x: 0.07, y: 0.08, size: 84, weight: bold, style: marker}
+  - {type: code, x: 0.07, y: 0.29, w: 0.86, title: Terminal, size: 34, in: {at: "+0.3s"},
+     text: "$ claude mcp add poppy --transport http https://mcp.getpoppy.ai\n# then ask:\n> Find the three best hooks in my last 20 videos."}
+  - {type: box, x: 0.6, y: 0.78, w: 0.33, h: 0.13, fill: accent, label: "Works in *any* agent", size: 36, color: white, radius: 60, in: {at: "+3.4s", from: pop}}

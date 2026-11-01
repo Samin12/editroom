@@ -283,6 +283,7 @@ dependencies = [
  "cutroom-core",
  "image",
  "rustybuzz",
+ "serde_yaml",
  "tiny-skia",
 ]
 

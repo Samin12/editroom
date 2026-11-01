@@ -31,7 +31,8 @@ pub struct ResolvedBeat {
     /// Output window.
     pub start_ms: f64,
     pub end_ms: f64,
-    /// Output times at which bullet items appear (one per item).
+    /// Output times at which bullet items appear (one per item). For `scene` beats: the
+    /// resolved layer times, flattened (see `crate::scene::unflatten`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub items_ms: Vec<f64>,
     /// Kept words spoken inside the window (output times), for word-synced reveals.
@@ -319,6 +320,28 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
         }
         let lo = words.partition_point(|w| w.end_ms <= start);
         let hi = words.partition_point(|w| w.start_ms < end);
+        if let BeatKind::Scene { layers, .. } = &b.kind {
+            // Layer anchors: a phrase matches the words said during the beat first, then the
+            // file's scope. Words land `lead` early, like the beat itself.
+            let win = match (words.get(lo), hi.checked_sub(1).and_then(|h| words.get(h))) {
+                (Some(a), Some(z)) if hi > lo => (a.id, z.id + 1),
+                _ => (0, 0),
+            };
+            let at = |a: &Anchor| -> anyhow::Result<f64> {
+                let r = anchor::resolve(a, src, &idx, win, &kept).or_else(|_| anchor::resolve(a, src, &idx, sc, &kept))?;
+                if let Some(w) = r.word {
+                    if !kept(w) {
+                        anyhow::bail!("anchor word w{w} {:?} is cut", src.words[w].text);
+                    }
+                }
+                Ok(anchor_out(&r, src, &map, false) - if r.word.is_some() { lead } else { 0.0 })
+            };
+            let (flat, probs) = crate::scene::resolve_times(layers, start, end, &at);
+            for (sev, m) in probs {
+                issues.push(Issue { sev, at_ms: Some(start), msg: format!("{label}: {m}") });
+            }
+            items_ms = flat;
+        }
         beats.push(ResolvedBeat {
             idx: i,
             lane: b.kind.lane(),

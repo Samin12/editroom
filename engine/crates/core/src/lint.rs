@@ -87,6 +87,13 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
                 }
             }
         }
+        if let BeatKind::Scene { layers, place, .. } = &b.kind {
+            // frame scenes sit under the camera tile in the panel layout
+            let cam = (*place == crate::scene::Place::Frame && plan.layout.default == LayoutMode::Panel).then_some(plan.layout.camera);
+            for (sev, m) in crate::scene::lint(layers, *place, spec_dir, cam) {
+                out.push(issue(sev, Some(b.start_ms), format!("scene ({}): {m}", b.origin)));
+            }
+        }
         for r in rects(&b.kind) {
             if r[2] <= 0.0 || r[3] <= 0.0 || r[0] < -0.01 || r[1] < -0.01 || r[0] + r[2] > 1.01 || r[1] + r[3] > 1.01 {
                 out.push(issue(Severity::Error, Some(b.start_ms), format!("{} ({}): rect {r:?} must be [x, y, w, h] inside 0..1", b.kind.name(), b.origin)));

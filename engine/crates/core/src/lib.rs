@@ -6,6 +6,7 @@
 //! * [`anchor`]  `w123`, `"a phrase"#2`, `s:754.2`, `o:61.5` resolution
 //! * [`resolve`] spec + source -> [`resolve::Plan`] (everything in output time)
 //! * [`compose`] what each output instant shows; shared by the renderer and the checker
+//! * [`scene`]   custom layered animations (`kind: scene`): layers, timing, lint
 //! * [`lint`]    the checks behind `cutroom check`
 
 pub mod anchor;
@@ -13,6 +14,7 @@ pub mod compose;
 pub mod lint;
 pub mod model;
 pub mod resolve;
+pub mod scene;
 pub mod spec;
 pub mod timemap;
 

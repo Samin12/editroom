@@ -81,6 +81,52 @@ fn diff_inside(a: &Pixmap, b: &Pixmap, r: Rect) -> usize {
     n
 }
 
+/// A `scene` beat over [start, end] from YAML; `wN` anchors land at start + 200 N ms.
+fn scene(yaml: &str, start: f64, end: f64) -> ResolvedBeat {
+    let kind: BeatKind = serde_yaml::from_str(yaml).unwrap();
+    let BeatKind::Scene { layers, .. } = &kind else { panic!("not a scene") };
+    let at = |a: &cutroom_core::spec::Anchor| -> anyhow::Result<f64> { Ok(start + a.0.trim_start_matches('w').parse::<f64>()? * 200.0) };
+    let (flat, probs) = cutroom_core::scene::resolve_times(layers, start, end, &at);
+    assert!(probs.is_empty(), "{probs:?}");
+    let mut b = beat(kind, start, end);
+    b.items_ms = flat;
+    b
+}
+
+/// Every layer type, a card background, and a full-frame scene.
+fn scene_beats() -> Vec<ResolvedBeat> {
+    vec![
+        scene(
+            r#"
+kind: scene
+layers:
+  - {type: highlight, x: 0.1, y: 0.06, w: 0.3, h: 0.08, in: {at: w2}}
+  - {type: text, text: "Every *layer* type", x: 0.08, y: 0.05, size: 80, style: underline}
+  - {id: a, type: box, x: 0.06, y: 0.3, w: 0.25, h: 0.2, label: Box, sub: with a sub, in: {at: w1, from: left}}
+  - {id: c, type: circle, x: 0.6, y: 0.4, r: 0.1, fill: accent, label: "1", in: {at: w3, from: pop}, keys: [{t: w8, scale: 1.2, rotate: 10}]}
+  - {type: arrow, from: a, to: c, curve: 0.2, in: {at: w4}}
+  - {type: line, points: [[0.05, 0.9], [0.4, 0.85], [0.7, 0.9]], dash: true, in: {at: w5}}
+  - {type: image, src: shot.png, x: 0.72, y: 0.1, w: 0.25, h: 0.25, ring: [0.1, 0.16, 0.3, 0.24], source: example.com, keys: [{t: w6, scale: 1.05}]}
+  - {type: code, x: 0.06, y: 0.58, w: 0.5, title: Terminal, text: "$ cargo run\n# done", in: {at: w2}}
+  - {type: counter, to: 4.76, suffix: M, x: 0.8, y: 0.6, size: 90, in: {at: w7}, out: {at: w15, to: up}}
+"#,
+            1000.0,
+            5000.0,
+        ),
+        scene(
+            r#"
+kind: scene
+bg: card
+layers:
+  - {type: text, text: "On a card", x: 0.5, y: 0.4, align: center, size: 96, in: {from: scale}}
+  - {type: box, x: 0.3, y: 0.7, w: 0.4, h: 0.15, fill: none, stroke: accent, in: {draw: true, at: w3}}
+"#,
+            1000.0,
+            5000.0,
+        ),
+    ]
+}
+
 fn stage_beats() -> Vec<ResolvedBeat> {
     let mut title = beat(BeatKind::Title { text: "Connect *Claude* to Poppy".into(), kicker: Some("Step 2".into()), sub: Some("In one prompt".into()) }, 1000.0, 5000.0);
     title.words = vec![OutWord { id: 0, text: "connect".into(), start_ms: 1130.0, end_ms: 1400.0 }];
@@ -96,6 +142,9 @@ fn stage_beats() -> Vec<ResolvedBeat> {
         beat(BeatKind::Code { text: "$ cargo run\n# done".into(), title: Some("Terminal".into()) }, 1000.0, 5000.0),
         beat(BeatKind::Quote { text: "Ship it.".into(), by: Some("Someone".into()) }, 1000.0, 5000.0),
     ]
+    .into_iter()
+    .chain(scene_beats())
+    .collect()
 }
 
 fn media(g: &Gfx) -> Pixmap {
@@ -136,6 +185,47 @@ fn stage_beats_are_deterministic_and_stay_in_the_panel() {
         g.stage(&mut late, panel(), &b, 6000.0, mm);
         assert_eq!(diff_inside(&late, &bare, panel()), 0, "{} after its window", b.kind.name());
     }
+}
+
+#[test]
+fn full_frame_scene_is_deterministic_and_animates() {
+    let g = gfx();
+    let fresh = gfx();
+    let b = scene(
+        r#"
+kind: scene
+place: frame
+bg: canvas
+layers:
+  - {type: text, text: "Full *frame*", x: 0.05, y: 0.1, size: 96}
+  - {type: circle, x: 0.3, y: 0.55, r: 0.1, label: "2", in: {at: w5, from: pop}}
+  - {type: counter, from: 0, to: 10075, prefix: "$", x: 0.55, y: 0.5, size: 120, in: {at: w2}}
+"#,
+        1000.0,
+        6000.0,
+    );
+    assert!(b.kind.full_frame());
+    let full = Rect::from_xywh(0.0, 0.0, W as f32, H as f32).unwrap();
+    let mut prev: Option<Pixmap> = None;
+    for t in [1000.0, 1500.0, 2200.0, 3000.0, 5900.0] {
+        let mut a = frame();
+        g.stage(&mut a, full, &b, t, None);
+        let mut c = frame();
+        fresh.stage(&mut c, full, &b, t, None);
+        assert!(a.data() == c.data(), "frame scene at {t}: same input, same bytes");
+        if let Some(p) = &prev {
+            assert!(diff_inside(p, &a, full) > 0, "frame scene changes between frames (t {t})");
+        }
+        prev = Some(a);
+    }
+    // the counter is still counting at 1.5 s and done by 3 s
+    let at = |t: f64| {
+        let mut pm = frame();
+        g.stage(&mut pm, full, &b, t, None);
+        pm
+    };
+    assert!(diff_inside(&at(1500.0), &at(1600.0), full) > 0);
+    assert_eq!(diff_inside(&at(4000.0), &at(4100.0), Rect::from_xywh(0.5 * W as f32, 0.45 * H as f32, 0.45 * W as f32, 0.3 * H as f32).unwrap()), 0, "settled counter is still");
 }
 
 #[test]

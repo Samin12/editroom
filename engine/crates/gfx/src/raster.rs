@@ -373,6 +373,13 @@ pub fn draw_img_ref(pm: &mut Pixmap, img: ImgRef<'_>, dst: [f32; 4], clip: IRect
     let sx = img.w as f32 / dw;
     let sy = img.h as f32 / dh;
     let exact = (sx - 1.0).abs() < 1e-4 && (sy - 1.0).abs() < 1e-4 && dx.fract() == 0.0 && dy.fract() == 0.0;
+    if exact {
+        // a size a hair over the image's (scale 1.00001) must not read past its last column
+        r = r.intersect(IRect::new(dx as i32, dy as i32, dx as i32 + img.w as i32, dy as i32 + img.h as i32));
+        if r.is_empty() {
+            return;
+        }
+    }
     let n = r.w() as usize;
     let pw = pm.width() as usize;
     let data = pm.data_mut();

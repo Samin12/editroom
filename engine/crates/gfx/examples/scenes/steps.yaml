@@ -1,0 +1,14 @@
+# A full-frame scene (place: frame): a 3-step timeline over the canvas, clear of the camera tile.
+kind: scene
+place: frame
+layers:
+  - {type: text, text: "The *3-step* system", x: 0.05, y: 0.09, size: 96, weight: bold}
+  - {type: line, points: [[0.12, 0.5], [0.39, 0.5]], color: line, width: 8, in: {at: "+0.6s", ms: 600}}
+  - {type: line, points: [[0.39, 0.5], [0.66, 0.5]], color: line, width: 8, in: {at: "+1.4s", ms: 600}}
+  - {type: circle, x: 0.12, y: 0.5, r: 0.075, fill: accent, label: "1", size: 64, color: white, in: {at: "+0.3s", from: pop}}
+  - {type: circle, x: 0.39, y: 0.5, r: 0.075, fill: card2, stroke: accent, width: 4, label: "2", size: 64, in: {at: "+1.1s", from: pop}}
+  - {type: circle, x: 0.66, y: 0.5, r: 0.075, fill: card2, stroke: accent, width: 4, label: "3", size: 64, in: {at: "+1.9s", from: pop}}
+  - {type: text, text: "Find the idea", x: 0.12, y: 0.63, size: 44, align: center, in: {at: "+0.5s"}}
+  - {type: text, text: "Film it once", x: 0.39, y: 0.63, size: 44, align: center, in: {at: "+1.3s"}}
+  - {type: text, text: "Let the *agent* edit", x: 0.66, y: 0.63, size: 44, align: center, in: {at: "+2.1s"}}
+  - {type: text, text: "≈ 15 minutes from raw recording to a finished video", x: 0.39, y: 0.82, size: 34, align: center, color: muted, weight: regular, in: {at: "+2.8s"}}

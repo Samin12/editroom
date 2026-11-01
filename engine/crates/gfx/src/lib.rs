@@ -22,6 +22,7 @@ mod numfmt;
 mod overlay;
 mod pal;
 mod raster;
+mod scene;
 mod stage;
 mod text;
 
@@ -121,6 +122,8 @@ pub(crate) struct Inner {
     layers: Cache<u64, Img>,
     /// Per-beat layouts by a content hash.
     layouts: Cache<u64, stage::Layout>,
+    /// `scene` beat layouts by a content hash.
+    scenes: Cache<u64, scene::SceneL>,
     /// Pre-scaled images by (path, w, h).
     images: Cache<(PathBuf, u32, u32), Option<Img>>,
 }
@@ -136,6 +139,7 @@ impl Gfx {
             shadows: Cache::new(32),
             layers: Cache::new(64),
             layouts: Cache::new(48),
+            scenes: Cache::new(16),
             images: Cache::new(24),
         };
         Ok(Gfx { theme, width, height, scale: height as f32 / 1080.0, inner })
