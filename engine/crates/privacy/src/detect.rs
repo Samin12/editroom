@@ -17,8 +17,23 @@ use std::hash::{Hash, Hasher};
 /// `v`, else group 1, else the whole match. It runs on spaced lines and on space-free joins.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Pattern {
+    /// What a match is reported as (`name` in `privacy-rules.yaml`).
+    #[serde(alias = "name")]
     pub kind: String,
     pub regex: String,
+}
+
+impl Pattern {
+    /// `name=regex` (the `--pattern` flag).
+    pub fn parse(s: &str) -> anyhow::Result<Pattern> {
+        let (k, re) = s.split_once('=').ok_or_else(|| anyhow!("pattern {s:?}: write name=regex"))?;
+        let (k, re) = (k.trim(), re.trim());
+        if k.is_empty() || re.is_empty() {
+            return Err(anyhow!("pattern {s:?}: write name=regex"));
+        }
+        Regex::new(re).map_err(|e| anyhow!("pattern {k}: {e}"))?;
+        Ok(Pattern { kind: k.to_string(), regex: re.to_string() })
+    }
 }
 
 /// One sighting in one frame.
@@ -907,6 +922,22 @@ mod tests {
             let w = line(&t.split(' ').collect::<Vec<_>>(), 0.0);
             assert!(det().detect(&w).is_empty(), "false positive on decoy {t:?}");
         }
+    }
+
+    #[test]
+    fn custom_patterns_find_what_they_name() {
+        let price = Pattern::parse(r"community-price=\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month)").unwrap();
+        let d = Detectors::new(&[price], &[], &[]).unwrap();
+        let kinds = |w: &[Word]| d.detect(w).into_iter().map(|o| o.kind).collect::<Vec<_>>();
+        assert_eq!(kinds(&line(&["Join", "for", "$97", "/", "month"], 0.0)), ["community-price"], "split by OCR");
+        assert_eq!(kinds(&line(&["only", "$49.99/mo"], 0.0)), ["community-price"]);
+        assert!(kinds(&line(&["$97", "one", "time"], 0.0)).is_empty());
+        // the allowlist applies to custom kinds too
+        let price = Pattern::parse(r"community-price=\$\d+/mo").unwrap();
+        let d = Detectors::new(&[price], &["$0/mo".into()], &[]).unwrap();
+        assert!(d.detect(&line(&["$0/mo"], 0.0)).is_empty());
+        assert!(Pattern::parse("no-equals").is_err());
+        assert!(Pattern::parse("bad=(").is_err());
     }
 
     #[test]

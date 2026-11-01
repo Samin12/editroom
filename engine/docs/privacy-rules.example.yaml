@@ -1,0 +1,16 @@
+# Copy to <work>/privacy-rules.yaml; `cutroom privacy work/` picks it up automatically
+# (or pass --rules path). Custom findings are handled exactly like the built-in ones: stored
+# redacted in privacy.json, turned into blur beats, and `check` / `render` refuse any that would
+# be visible unblurred.
+patterns:
+  # the paid community's price on a checkout or Skool page ("$97/month", "$49.99 / mo")
+  - {name: community-price, regex: '\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month)'}
+  # a regex capture group named `v` (or group 1) is what gets blurred; otherwise the whole match
+  - {name: invoice-number, regex: 'INV-(?P<v>\d{5,})'}
+# values that may stay visible: exact text (case-insensitive), "@domain" for a whole email
+# domain, or "/regex/"
+allow:
+  - "@aianswer.us"
+  - "/^support@/"
+# built-in kinds to leave out entirely (api_key, token, password, email, phone, card, ...)
+skip: []

@@ -292,7 +292,7 @@ fn main() -> anyhow::Result<()> {
     push("42-image-missing", sc.base(2000.0, Some((&missing, None))));
 
     // Video.
-    let video = beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Gaston rides the wave".into()) }, 0.0, 5000.0);
+    let video = beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Gaston rides the wave".into()), fit: Default::default(), alpha: None, looped: None }, 0.0, 5000.0);
     let (vw, vh) = g.stage_media_size(panel);
     let vf = fake_video(vw, vh, 0.5);
     push("50-video-2000", sc.base(2000.0, Some((&video, Some(&vf)))));

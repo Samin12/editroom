@@ -175,6 +175,11 @@ impl Gfx {
         stage::draw(self, pm, panel, beat, t_ms, media);
     }
 
+    /// The bare panel surface (no beat), for clips that fill the panel slot.
+    pub fn panel_surface(&self, pm: &mut Pixmap, panel: Rect, t_ms: f64) {
+        stage::draw_panel_surface(self, pm, panel, t_ms);
+    }
+
     /// Size (px) gfx wants `video` beat frames decoded at, for a given panel.
     pub fn stage_media_size(&self, panel: Rect) -> (u32, u32) {
         ((panel.width() * 0.86) as u32 & !1, (panel.height() * 0.78) as u32 & !1)

@@ -13,7 +13,7 @@ milliseconds, never write animation code, never touch a timeline by hand.
 cutroom ingest borumi "<bundle>.bmprojbundle" work/   # raw takes (read-only; --scenes 3-5 for a part), or: ingest files work/ --camera c.mp4 --screen s.mov
 cutroom agent work/               # headless first pass: cut review + chapters + visuals per chapter (claude -p, parallel)
 cutroom cut work/ [--accept 1,3,7-9]   # retakes, false starts, fillers, silences -> cuts.yaml (+ review.md)
-cutroom privacy work/ [--allow me@x.com]   # OCR secrets on screen -> beats/privacy.yaml (blur beats)
+cutroom privacy work/ [--allow me@x.com] [--pattern name=regex]   # OCR secrets (+ work/privacy-rules.yaml) -> beats/privacy.yaml
 cutroom brief work/ --from w0 --to w2000    # kept transcript: "w123 one sentence per line"
 # ... write chapters + beats (below) ...
 cutroom check work/               # must print 0 errors
@@ -46,7 +46,7 @@ Anchors: `w123` (from brief), `"a phrase he says"` (`#2` = 2nd match), `s:754.2`
 | bullets | items: [text or {text, at}], title? | steps/lists; items with `at` appear as he says them |
 | number | value, label? | a stat he says ("$10,075", "4.76M"); counts up |
 | image | src, caption?, highlight: [x,y,w,h]?, source? | PROOF: a real screenshot/page, push-in, highlight in image coords |
-| video | src, from?, caption? | real footage / b-roll in the panel |
+| video | src, from?, caption?, fit?, alpha?, loop? | footage / b-roll / a pre-rendered animation. `fit: card` (default, on a card, loops), `panel` (fills the panel slot), `frame` (full frame under the camera tile; with a transparent .mov it overlays the footage). Clips that end hold their last frame unless `loop: true` |
 | code | text, title? | a prompt or command typing on |
 | quote | text, by? | a quote / tweet line |
 | scene | layers: [...], place: stage/frame?, bg: none/card/canvas? | a CUSTOM animation: text, boxes, circles, lines, arrows (attach by id), images (with `ring`), code, counters, highlights, each entering on its own word. See docs/SCENE.md |
@@ -80,6 +80,13 @@ Anchor each layer's `in: {at: ...}` to the word that introduces it.
     - {type: counter, to: 10075, prefix: "$", x: 0.5, y: 0.72, size: 120, in: {at: "ten thousand"}}
 ```
 Full field list, timing rules and four copy-paste examples: docs/SCENE.md.
+
+## Music and privacy rules
+- Music bed: `output: {music: {src: music/bed.mp3, gain_db: -18, duck_db: 12}}` in edit.yaml. It
+  loops, ducks under his voice and fades at the ends (`render --no-music` to preview without it).
+- Project privacy: `work/privacy-rules.yaml` with `patterns: [{name, regex}]`, `allow`, `skip`
+  (e.g. the community price `\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month)`). Run `privacy` again after
+  changing it; custom findings are blurred and enforced like keys and emails.
 
 ## Rules that keep quality high
 - Proof over animation: when he claims something, show the real page (`image` with `highlight`).

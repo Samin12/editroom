@@ -66,12 +66,61 @@ pub struct OutputSpec {
     /// Burn captions into the picture (an .srt is always written).
     #[serde(default)]
     pub captions: bool,
+    /// A music bed looped under the whole video, ducked under the narration.
+    #[serde(default)]
+    pub music: Option<MusicSpec>,
 }
 
 impl Default for OutputSpec {
     fn default() -> Self {
-        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false }
+        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false, music: None }
     }
+}
+
+/// `output.music`: a bed track looped to the video length, ducked while he talks, faded in at the
+/// start and out at the end, mixed before loudness normalization.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MusicSpec {
+    /// Audio file (relative to the spec's folder, or absolute).
+    pub src: String,
+    /// Level of the bed against the file's own level (dB).
+    #[serde(default = "d_music_gain")]
+    pub gain_db: f64,
+    /// Extra attenuation while narration is present (dB, positive = quieter).
+    #[serde(default = "d_music_duck")]
+    pub duck_db: f64,
+    /// How fast the bed ducks when he starts talking (ms).
+    #[serde(default = "d_music_attack")]
+    pub attack_ms: f64,
+    /// How fast it comes back after he stops (ms).
+    #[serde(default = "d_music_release")]
+    pub release_ms: f64,
+    /// Fade in at the start and out at the end of the video (ms).
+    #[serde(default = "d_music_fade")]
+    pub fade_ms: f64,
+    /// Narration level (dBFS, short-term peak) above which the bed ducks.
+    #[serde(default = "d_music_threshold")]
+    pub threshold_db: f64,
+}
+
+fn d_music_gain() -> f64 {
+    -18.0
+}
+fn d_music_duck() -> f64 {
+    12.0
+}
+fn d_music_attack() -> f64 {
+    60.0
+}
+fn d_music_release() -> f64 {
+    450.0
+}
+fn d_music_fade() -> f64 {
+    1500.0
+}
+fn d_music_threshold() -> f64 {
+    -45.0
 }
 
 fn d_height() -> u32 {
@@ -293,14 +342,25 @@ pub enum BeatKind {
         #[serde(default)]
         source: Option<String>,
     },
-    /// A muted video clip playing in the panel (b-roll, real footage).
+    /// A muted video clip (b-roll, real footage, a pre-rendered animation). `fit: card` plays it
+    /// on a card in the panel, `panel` fills the panel slot, `frame` covers the whole frame under
+    /// the camera tile (with `alpha`, a transparent overlay such as a lower third).
     Video {
         src: String,
         /// Start inside the clip, seconds.
         #[serde(default)]
         from: Option<f64>,
+        /// Shown under the card (`fit: card` only).
         #[serde(default)]
         caption: Option<String>,
+        #[serde(default)]
+        fit: VideoFit,
+        /// Composite the clip's transparency. Default: detected from the file.
+        #[serde(default)]
+        alpha: Option<bool>,
+        /// Restart at the end. Default: true for `card`, false otherwise (the last frame holds).
+        #[serde(default, rename = "loop")]
+        looped: Option<bool>,
     },
     /// A code / prompt card that types on.
     Code {
@@ -353,6 +413,26 @@ pub enum BeatKind {
     Layout { mode: LayoutMode },
 }
 
+/// Where a `video` beat is drawn.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum VideoFit {
+    /// On a card in the panel, with an optional caption (the stage look).
+    #[default]
+    Card,
+    /// Fills the panel slot (cover-cropped, rounded like the screen recording).
+    Panel,
+    /// Covers the whole frame, above the screen and below the camera tile and badge.
+    Frame,
+}
+
+impl VideoFit {
+    /// Whether a clip of this fit loops by default.
+    pub fn loops_by_default(self) -> bool {
+        self == VideoFit::Card
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Lane {
@@ -366,6 +446,8 @@ impl BeatKind {
     pub fn lane(&self) -> Lane {
         use BeatKind::*;
         match self {
+            // A full-frame clip does not take over the panel: what is under it keeps playing.
+            Video { fit: VideoFit::Frame, .. } => Lane::Overlay,
             Title { .. } | Bullets { .. } | Number { .. } | Image { .. } | Video { .. } | Code { .. } | Quote { .. } | Scene { .. } => Lane::Stage,
             Ring { .. } | Highlight { .. } | Arrow { .. } | Callout { .. } | Lower { .. } => Lane::Overlay,
             Blur { .. } | Zoom { .. } => Lane::Screen,

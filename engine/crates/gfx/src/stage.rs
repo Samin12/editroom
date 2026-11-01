@@ -150,6 +150,15 @@ pub(crate) fn layout_key(beat: &ResolvedBeat, geo: &Geo) -> u64 {
     hash_of(&(format!("{:?}", beat.kind), beat.start_ms.to_bits(), beat.end_ms.to_bits(), items, words, [geo.w.to_bits(), geo.h.to_bits()]))
 }
 
+/// Just the panel surface (no beat): what a `video` beat with `fit: panel` plays over.
+pub(crate) fn draw_panel_surface(g: &Gfx, pm: &mut Pixmap, panel: Rect, t_ms: f64) {
+    let geo = Geo::new(panel);
+    let clip = IRect::round(panel).intersect(IRect::of(pm));
+    if !clip.is_empty() {
+        draw_surface(g, pm, &geo, clip, &g.pal(), t_ms);
+    }
+}
+
 /// The raised panel surface plus its own slower dot grid (parallax against the canvas).
 pub(crate) fn draw_surface(g: &Gfx, pm: &mut Pixmap, geo: &Geo, clip: IRect, pal: &Pal, t_ms: f64) {
     let r = g.slot_radius();
@@ -669,6 +678,10 @@ impl Frame<'_> {
             Some(_) => fill_rrect(pm, sx, sy, sw, sh, l.radius, pal.card2, op),
             None => match media {
                 Some(m) if m.width() > 0 && m.height() > 0 => {
+                    if !raster::looks_opaque(m.data()) {
+                        // a clip with transparency sits on the card colour, not on the panel
+                        fill_rrect(pm, sx, sy, sw, sh, l.radius, pal.card2, op);
+                    }
                     let k = (sw / m.width() as f32).max(sh / m.height() as f32);
                     let (dw, dh) = (m.width() as f32 * k, m.height() as f32 * k);
                     let (dx, dy2) = (sx + (sw - dw) * 0.5, sy + (sh - dh) * 0.5);

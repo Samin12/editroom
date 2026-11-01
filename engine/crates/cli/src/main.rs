@@ -68,6 +68,12 @@ enum Cmd {
         /// Values that may stay visible: an exact email/value, "@domain", or "/regex/" (repeatable).
         #[arg(long)]
         allow: Vec<String>,
+        /// Extra detector, `name=regex` (repeatable); found like the built-in kinds.
+        #[arg(long)]
+        pattern: Vec<String>,
+        /// Rules file (patterns, allow, skip). Default: privacy-rules.yaml in the work folder.
+        #[arg(long)]
+        rules: Option<PathBuf>,
     },
     /// Lint the edit: anchors, overlaps, empty panels, privacy, missing files.
     Check {
@@ -131,6 +137,9 @@ enum Cmd {
         /// Gain of system audio mixed under the mic (0 = mute).
         #[arg(long, default_value_t = 0.6)]
         system_gain: f32,
+        /// Leave out the music bed (`output.music`).
+        #[arg(long)]
+        no_music: bool,
         /// Render even when check finds errors.
         #[arg(long)]
         force: bool,
@@ -322,15 +331,24 @@ fn main() -> Result<()> {
             };
             print!("{}", resolve::brief(&p.src, if raw { None } else { Some(&p.plan) }, lo, hi, width));
         }
-        Cmd::Privacy { dir, every, allow } => {
+        Cmd::Privacy { dir, every, allow, pattern, rules } => {
             let t = Instant::now();
             let sp = spec_path(&dir);
             let loaded = spec::load(&sp)?;
             let src = Source::load(&loaded.source_path)?;
-            let mut opts = cutroom_privacy::ScanOpts { every_ms: every, ..Default::default() };
-            opts.allow.extend(allow);
-            let f = cutroom_privacy::scan(&src, &opts)?;
             let base = sp.parent().unwrap_or(Path::new("."));
+            let mut opts = cutroom_privacy::ScanOpts { every_ms: every, ..Default::default() };
+            let rules_path = rules.clone().unwrap_or_else(|| base.join("privacy-rules.yaml"));
+            if rules.is_some() || rules_path.exists() {
+                let r = cutroom_privacy::Rules::load(&rules_path)?;
+                println!("rules: {} ({} patterns, {} allowed, {} kinds skipped)", rules_path.display(), r.patterns.len(), r.allow.len(), r.skip.len());
+                r.apply(&mut opts);
+            }
+            opts.allow.extend(allow);
+            for p in &pattern {
+                opts.extra_patterns.push(cutroom_privacy::Pattern::parse(p)?);
+            }
+            let f = cutroom_privacy::scan(&src, &opts)?;
             cutroom_privacy::write_json(&base.join("privacy.json"), &f)?;
             std::fs::create_dir_all(base.join("beats"))?;
             std::fs::write(base.join("beats/privacy.yaml"), cutroom_privacy::propose_beats(&f))?;
@@ -407,7 +425,7 @@ fn main() -> Result<()> {
             cutroom_render::save_png(&pm, &out)?;
             println!("{} ({} frames: {})", out.display(), times.len(), times.iter().take(40).map(|t| clock(*t)).collect::<Vec<_>>().join(" "));
         }
-        Cmd::Render { dir, out, jobs, codec, height, from, to, no_audio, loudnorm, system_gain, force, hw } => {
+        Cmd::Render { dir, out, jobs, codec, height, from, to, no_audio, loudnorm, system_gain, no_music, force, hw } => {
             let p = open(&dir, height)?;
             let segs = segments(&p.plan, &p.src);
             let issues = lint::check(&p.plan, &p.src, &segs, &p.loaded.dir, &findings(&dir));
@@ -429,6 +447,7 @@ fn main() -> Result<()> {
                 audio: !no_audio,
                 loudnorm,
                 system_gain,
+                no_music,
                 work: None,
                 quiet: false,
                 hw_share: hw,

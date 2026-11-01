@@ -19,6 +19,7 @@ fn main() -> anyhow::Result<()> {
         audio: true,
         loudnorm: false,
         system_gain: 0.0,
+        no_music: false,
         work: None,
         quiet: true,
         hw_share: std::env::var("HW").ok().map(|v| v.parse().unwrap()).unwrap_or(0.0),

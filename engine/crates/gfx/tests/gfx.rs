@@ -138,7 +138,7 @@ fn stage_beats() -> Vec<ResolvedBeat> {
         beat(BeatKind::Number { value: "$10,075".into(), label: Some("per video".into()) }, 1000.0, 5000.0),
         beat(BeatKind::Image { src: "shot.png".into(), caption: Some("A screenshot".into()), highlight: Some([0.1, 0.16, 0.3, 0.24]), source: Some("example.com".into()) }, 1000.0, 5000.0),
         beat(BeatKind::Image { src: "missing.png".into(), caption: None, highlight: None, source: None }, 1000.0, 5000.0),
-        beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Footage".into()) }, 1000.0, 5000.0),
+        beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Footage".into()), fit: Default::default(), alpha: None, looped: None }, 1000.0, 5000.0),
         beat(BeatKind::Code { text: "$ cargo run\n# done".into(), title: Some("Terminal".into()) }, 1000.0, 5000.0),
         beat(BeatKind::Quote { text: "Ship it.".into(), by: Some("Someone".into()) }, 1000.0, 5000.0),
     ]
@@ -234,9 +234,9 @@ fn stage_handles_odd_inputs() {
     // Zero-length beat, a video beat without a frame, a frame of another size, a tiny panel.
     let mut pm = frame();
     g.stage(&mut pm, panel(), &beat(BeatKind::Title { text: "x".into(), kicker: None, sub: None }, 1000.0, 1000.0), 1000.0, None);
-    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None }, 0.0, 3000.0), 1500.0, None);
+    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None, fit: Default::default(), alpha: None, looped: None }, 0.0, 3000.0), 1500.0, None);
     let odd = Pixmap::new(37, 91).unwrap();
-    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None }, 0.0, 3000.0), 1500.0, Some(&odd));
+    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None, fit: Default::default(), alpha: None, looped: None }, 0.0, 3000.0), 1500.0, Some(&odd));
     let tiny = Rect::from_xywh(10.0, 10.0, 40.0, 30.0).unwrap();
     for b in stage_beats() {
         let mut t = frame();

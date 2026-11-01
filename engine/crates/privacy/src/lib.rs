@@ -93,6 +93,45 @@ impl Default for ScanOpts {
     }
 }
 
+/// Project privacy rules (`privacy-rules.yaml` in the work folder): extra patterns, values that
+/// may stay visible, built-in kinds to skip.
+///
+/// ```yaml
+/// patterns:
+///   - {name: community-price, regex: '\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month)'}
+/// allow: [samin@aianswer.us, "@aianswer.us"]
+/// skip: [phone]
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rules {
+    #[serde(default)]
+    pub patterns: Vec<Pattern>,
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub skip: Vec<String>,
+}
+
+impl Rules {
+    /// Read a rules file; every regex is checked here so a typo fails before the scan.
+    pub fn load(path: &Path) -> Result<Rules> {
+        let txt = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let r: Rules = serde_yaml::from_str(&txt).with_context(|| format!("parsing {}", path.display()))?;
+        for p in &r.patterns {
+            regex::Regex::new(&p.regex).map_err(|e| anyhow!("{}: pattern {}: {e}", path.display(), p.kind))?;
+        }
+        Ok(r)
+    }
+
+    /// Add these rules to scan options.
+    pub fn apply(&self, opts: &mut ScanOpts) {
+        opts.extra_patterns.extend(self.patterns.iter().cloned());
+        opts.allow.extend(self.allow.iter().cloned());
+        opts.skip_kinds.extend(self.skip.iter().cloned());
+    }
+}
+
 /// What a scan did (counts only, never values).
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ScanStats {

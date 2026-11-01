@@ -91,6 +91,57 @@ pub fn blit_rounded(dst: &mut Pixmap, x: i32, y: i32, src: &[u8], w: u32, h: u32
     }
 }
 
+/// Composite a PREMULTIPLIED `w x h` RGBA frame over (x, y) of `dst` (source-over), scaled by
+/// `opacity` (0..=1) and rounded with `mask`. Opaque runs at full opacity are copied.
+#[allow(clippy::too_many_arguments)]
+pub fn blend_over(dst: &mut Pixmap, x: i32, y: i32, src: &[u8], w: u32, h: u32, opacity: f32, mask: Option<&RoundMask>) {
+    let op = (opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+    if op == 0 {
+        return;
+    }
+    let dw = dst.width() as i32;
+    let dh = dst.height() as i32;
+    let data = dst.data_mut();
+    let x0 = x.max(0);
+    let x1 = (x + w as i32).min(dw);
+    if x1 <= x0 {
+        return;
+    }
+    for row in 0..h as i32 {
+        let ty = y + row;
+        if ty < 0 || ty >= dh {
+            continue;
+        }
+        let s_off = ((row as u32 * w) as i32 + (x0 - x)) as usize * 4;
+        let d_off = (ty * dw + x0) as usize * 4;
+        let n = (x1 - x0) as usize;
+        let corner_row = mask.map(|m| (row as u32) < m.r || (row as u32) >= m.h.saturating_sub(m.r)).unwrap_or(false);
+        let srow = &src[s_off..s_off + n * 4];
+        let drow = &mut data[d_off..d_off + n * 4];
+        for (i, (s, d)) in srow.as_chunks::<4>().0.iter().zip(drow.as_chunks_mut::<4>().0).enumerate() {
+            let mut k = op;
+            if corner_row {
+                k = k * mask.unwrap().alpha((x0 - x) as u32 + i as u32, row as u32) as u32 / 255;
+            }
+            let sa = s[3] as u32;
+            if sa == 0 || k == 0 {
+                continue;
+            }
+            if sa == 255 && k == 255 {
+                *d = *s;
+                continue;
+            }
+            // premultiplied source-over: d = s*k + d*(1 - sa*k)
+            let a = (sa * k + 127) / 255;
+            let inv = 255 - a;
+            for c in 0..4 {
+                let sc = (s[c] as u32 * k + 127) / 255;
+                d[c] = (sc + (d[c] as u32 * inv + 127) / 255).min(255) as u8;
+            }
+        }
+    }
+}
+
 /// Bilinear resample of the source sub-rectangle `sr` (pixels, fractional) of an opaque `sw x sh`
 /// frame into a `w x h` frame. Used for zooms.
 pub fn resample(src: &[u8], sw: u32, sh: u32, sr: [f32; 4], w: u32, h: u32, out: &mut Vec<u8>) {
@@ -181,6 +232,24 @@ mod tests {
         assert_eq!(px(30, 30), 10); // corner stays background
         assert_eq!(px(50, 50), 200); // inside is copied
         assert_eq!(px(30, 50), 200); // edge middle is copied
+    }
+
+    #[test]
+    fn blend_over_premultiplied() {
+        let mut pm = Pixmap::new(4, 1).unwrap();
+        pm.fill(tiny_skia::Color::from_rgba8(0, 0, 200, 255));
+        // clear, half-transparent white (premultiplied 128), opaque red, garbage colour under a=0
+        let src = [0, 0, 0, 0, 128, 128, 128, 128, 255, 0, 0, 255, 0, 0, 0, 0];
+        blend_over(&mut pm, 0, 0, &src, 4, 1, 1.0, None);
+        let px = |x: u32| pm.pixel(x, 0).unwrap();
+        assert_eq!((px(0).red(), px(0).blue()), (0, 200), "clear keeps the background");
+        assert_eq!((px(1).red(), px(1).blue(), px(1).alpha()), (128, 128 + 100, 255), "half over blue");
+        assert_eq!((px(2).red(), px(2).blue()), (255, 0), "opaque copies");
+        // opacity scales the whole source
+        let mut pm2 = Pixmap::new(1, 1).unwrap();
+        pm2.fill(tiny_skia::Color::from_rgba8(0, 0, 0, 255));
+        blend_over(&mut pm2, 0, 0, &[255, 255, 255, 255], 1, 1, 0.5, None);
+        assert_eq!(pm2.pixel(0, 0).unwrap().red(), 128);
     }
 
     #[test]
