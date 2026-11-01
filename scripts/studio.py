@@ -31,6 +31,7 @@ Work dir layout (W = "~/Borumi Projects/<name> editroom"):
   W/beats/studio-films.yaml      the films as `video` beats (fit: frame)
 """
 import argparse
+import concurrent.futures as cf
 import datetime as dt
 import glob
 import hashlib
@@ -422,6 +423,13 @@ def cmd_resolve(a):
         row["sig"] = hashlib.sha256(f"{row['slot0']}|{row['frames']}|{row['words_sig']}|{row['mode']}".encode()).hexdigest()[:12]
         prev = old.get(key)
         row["moved"] = bool(prev and prev.get("sig") and prev.get("sig") != row["sig"])
+        # a slot that only slid in time (same frames, same words at the same relative frames, same mode): its brief
+        # still holds (everything in it is slot-relative), only the render must be redone for the new canvas phase
+        if row["moved"] and prev.get("frames") == row["frames"] and prev.get("words_sig") == row["words_sig"] \
+                and prev.get("mode") == row["mode"]:
+            row["shifted_from"] = prev.get("slot0")
+            if read_sig(brief_sig_path(row)) == prev.get("sig"):
+                stamp(brief_sig_path(row), row["sig"])
         out_slots.append(row)
         if s["mode"] != "none":
             write_job(w, row, s)
@@ -450,6 +458,8 @@ def cmd_resolve(a):
                       "films": sum(1 for s in out_slots if s["mode"] == "behind"),
                       "overlays": sum(1 for s in out_slots if s["mode"] == "front"),
                       "moved": [s["key"] for s in out_slots if s["moved"]],
+                      "shifted": [s["key"] for s in out_slots if s.get("shifted_from") is not None],
+                      "changed": [s["key"] for s in out_slots if s["moved"] and s.get("shifted_from") is None],
                       "frames_covered": cover, "frames_total": total,
                       "groups_skipped_old_engine": groups_skipped, "map_hash": st["lock"]["map_hash"]}, indent=1))
 
@@ -969,6 +979,74 @@ def _stat_series(video, vf, key):
     return vals
 
 
+def cmd_rerender_shifted(a):
+    """Re-render slots that only slid in time (`resolve` lists them as `shifted`): same scene, new slot0 for the
+    canvas phase. The previous passing check carries over when the new render has the right frame count and its
+    mechanical check is clean; anything else goes back to `design --only`."""
+    w = os.path.abspath(a.work)
+    sec = jload(studio(w, "sections.json")) or {}
+    only = set(a.only.split(",")) if a.only else None
+    todo = []
+    for s in sec.get("slots", []):
+        if s.get("shifted_from") is None or s["mode"] == "none" or (only and s["key"] not in only):
+            continue
+        st = slot_status(w, s)
+        if not st["stale_render"]:
+            continue
+        rep = jload(os.path.join(s["job_dir"], "design-report.json"), {}) or {}
+        prev_chk = jload(os.path.join(s["job_dir"], "checks", f"check-v{rep.get('version')}.json"))
+        if not rep.get("version") or not prev_chk or not prev_chk.get("pass"):
+            print(f"{s['key']}: no passing check to carry over; use design --only {s['key']}")
+            continue
+        todo.append((s, rep, prev_chk))
+    if a.dry_run:
+        print(json.dumps([t[0]["key"] for t in todo]))
+        return
+    job = ["node", os.path.join(ER, "studio", "jobs", "job.mjs")]
+
+    def one(item):
+        s, rep, prev_chk = item
+        d = s["job_dir"]
+        rj = os.path.join(d, "render.json")
+        r = jload(rj, {}) or {}
+        v = int(r.get("version") or rep["version"]) + 1
+        r.update({"version": v, "notes": f"v{v}: re-render only; slot moved from {s['shifted_from']} ms to {s['slot0']} ms "
+                                        f"(cut change elsewhere), scene unchanged (canvas phase follows slot0)"})
+        jsave(rj, r)
+        stamp(job_sig_path(s), s["sig"])
+        p = run(job + ["render", d, "--foreground"])
+        if p.returncode:
+            return s["key"], False, f"render failed: {(p.stdout + p.stderr)[-400:]}"
+        out = sorted(glob.glob(os.path.join(d, "out", f"*-v{v}.mp4")) + glob.glob(os.path.join(d, "out", f"*-v{v}.mov")))
+        if not out:
+            return s["key"], False, "render produced no file"
+        frames = probe_frames(out[0])
+        if frames != s["frames"]:
+            return s["key"], False, f"frame count {frames}, slot needs {s['frames']}"
+        mech = run([sys.executable, os.path.abspath(__file__), "check-render", w, s["key"], "--render", out[0], "--json"])
+        try:
+            m = json.loads(mech.stdout[mech.stdout.index("{"):])
+        except ValueError:
+            m = {}
+        bad = [f for f in m.get("findings", []) if f.get("sev", f.get("severity")) in ("error", "blocking")]
+        if mech.returncode not in (0,) and bad:
+            return s["key"], False, f"mechanical check: {bad[:3]}"
+        chk = dict(prev_chk)
+        chk.update({"key": s["key"], "version": v, "carried_from": f"check-v{rep['version']}.json",
+                    "carry_reason": f"re-render for a slot that moved {s['shifted_from']} -> {s['slot0']} ms; same scene, "
+                                    f"frames {frames}/{s['frames']}, mechanical check clean"})
+        jsave(os.path.join(d, "checks", f"check-v{v}.json"), chk)
+        rep.update({"version": v, "render_path": out[0]})
+        jsave(os.path.join(d, "design-report.json"), rep)
+        return s["key"], True, out[0]
+
+    with cf.ThreadPoolExecutor(max(1, min(len(todo), 6))) as ex:
+        res = list(ex.map(one, todo))
+    print(json.dumps([{"key": k, "ok": ok, "detail": det} for k, ok, det in res], indent=1))
+    if not all(ok for _, ok, _ in res):
+        sys.exit(2)
+
+
 def cmd_check_render(a):
     w = os.path.abspath(a.work)
     sec = jload(studio(w, "sections.json")) or {}
@@ -1167,6 +1245,8 @@ def main():
     p.add_argument("--fallback", action="store_true")
     p = sub.add_parser("check-render"); p.add_argument("work"); p.add_argument("key"); p.add_argument("--render")
     p.add_argument("--json", action="store_true"); p.add_argument("--fallback", action="store_true")
+    p = sub.add_parser("rerender-shifted", help="re-render slots that only moved in time (scene unchanged); carries the check")
+    p.add_argument("work"); p.add_argument("--only"); p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("log"); p.add_argument("work"); p.add_argument("stage"); p.add_argument("event", choices=["start", "end"])
     p.add_argument("--note")
     p = sub.add_parser("report"); p.add_argument("work")
@@ -1181,7 +1261,7 @@ def main():
     a = ap.parse_args()
     {"init": cmd_init, "resolve": cmd_resolve, "verify": cmd_verify, "status": cmd_status, "args": cmd_args,
      "wire": cmd_wire, "timing": cmd_timing, "boxes": cmd_boxes, "sheet-video": cmd_sheet_video,
-     "check-render": cmd_check_render, "log": cmd_log, "report": cmd_report, "jev-privacy": cmd_jev_privacy,
+     "check-render": cmd_check_render, "rerender-shifted": cmd_rerender_shifted, "log": cmd_log, "report": cmd_report, "jev-privacy": cmd_jev_privacy,
      "jev-frames": cmd_jev_frames, "polish": cmd_polish, "rank-crops": cmd_rank_crops}[a.cmd](a)
 
 

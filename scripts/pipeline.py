@@ -406,6 +406,10 @@ def st_render(r, proj):
         cmd += shlex.split(a.render_args)
     r.sh(cmd, "render")
     r.state["video"] = out
+    srt = out[:-4] + ".srt"
+    if os.path.exists(srt) and not a.dry_run:
+        # names in the captions: speech-to-text spellings -> the right names (templates + <work>/caption-names.json)
+        r.sh([sys.executable, "-I", os.path.join(HERE, "fix_captions.py"), srt, "--work", r.work], "captions", check=False)
     rep = out[:-4] + ".report.json"
     if os.path.exists(rep):
         j = json.load(open(rep))

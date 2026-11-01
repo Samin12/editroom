@@ -1,0 +1,23 @@
+{
+ "_note": "Speech-to-text spellings -> the right names, applied to the captions (.srt) after every render. Whole words, case-insensitive. A work dir's caption-names.json adds to (and overrides) this list.",
+ "Cloud Code": "Claude Code",
+ "Clot Code": "Claude Code",
+ "Clod Code": "Claude Code",
+ "Cloud Opus": "Claude Opus",
+ "Cloud Sonnet": "Claude Sonnet",
+ "Cloud Haiku": "Claude Haiku",
+ "Hancho": "Honcho",
+ "Grockbot": "Grok Bot",
+ "Grocbot": "Grok Bot",
+ "Grok bot": "Grok Bot",
+ "Whisperflow": "Wispr Flow",
+ "Whisper Flow": "Wispr Flow",
+ "Super Whisper": "SuperWhisper",
+ "Karpathi": "Karpathy",
+ "Boris Cherney": "Boris Cherny",
+ "Hermie": "Hermes",
+ "Composeo": "Composio",
+ "Hepta base": "Heptabase",
+ "Higgs field": "Higgsfield",
+ "Borumy": "Borumi"
+}
