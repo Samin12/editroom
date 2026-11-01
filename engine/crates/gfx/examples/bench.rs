@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
         ("title", title),
         ("bullets", bullets),
         ("number", beat(BeatKind::Number { value: "$10,075".into(), label: Some("paid for one video".into()) }, 0.0, 3500.0)),
-        ("image", beat(BeatKind::Image { src: "shot.png".into(), caption: Some("The campaign list".into()), highlight: Some([0.1, 0.1, 0.3, 0.2]), source: Some("launchpoint.app".into()) }, 0.0, 5000.0)),
+        ("image", beat(BeatKind::Image { src: "shot.png".into(), caption: Some("The campaign list".into()), highlight: Some([0.1, 0.1, 0.3, 0.2]), source: Some("launchpoint.app".into()), proof: None }, 0.0, 5000.0)),
         ("video", beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Real footage".into()) }, 0.0, 5000.0)),
         ("code", beat(BeatKind::Code { text: "$ claude mcp add poppy --transport http https://mcp.getpoppy.ai\n# then ask:\n> Find the three best hooks in my last 20 videos.".into(), title: Some("Terminal".into()) }, 0.0, 6000.0)),
         ("quote", beat(BeatKind::Quote { text: "The best time to post was yesterday.".into(), by: Some("Every creator".into()) }, 0.0, 4000.0)),
