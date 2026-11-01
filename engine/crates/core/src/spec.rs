@@ -342,14 +342,25 @@ pub enum BeatKind {
         #[serde(default)]
         source: Option<String>,
     },
-    /// A muted video clip playing in the panel (b-roll, real footage).
+    /// A muted video clip (b-roll, real footage, a pre-rendered animation). `fit: card` plays it
+    /// on a card in the panel, `panel` fills the panel slot, `frame` covers the whole frame under
+    /// the camera tile (with `alpha`, a transparent overlay such as a lower third).
     Video {
         src: String,
         /// Start inside the clip, seconds.
         #[serde(default)]
         from: Option<f64>,
+        /// Shown under the card (`fit: card` only).
         #[serde(default)]
         caption: Option<String>,
+        #[serde(default)]
+        fit: VideoFit,
+        /// Composite the clip's transparency. Default: detected from the file.
+        #[serde(default)]
+        alpha: Option<bool>,
+        /// Restart at the end. Default: true for `card`, false otherwise (the last frame holds).
+        #[serde(default, rename = "loop")]
+        looped: Option<bool>,
     },
     /// A code / prompt card that types on.
     Code {
@@ -393,6 +404,26 @@ pub enum BeatKind {
     Layout { mode: LayoutMode },
 }
 
+/// Where a `video` beat is drawn.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum VideoFit {
+    /// On a card in the panel, with an optional caption (the stage look).
+    #[default]
+    Card,
+    /// Fills the panel slot (cover-cropped, rounded like the screen recording).
+    Panel,
+    /// Covers the whole frame, above the screen and below the camera tile and badge.
+    Frame,
+}
+
+impl VideoFit {
+    /// Whether a clip of this fit loops by default.
+    pub fn loops_by_default(self) -> bool {
+        self == VideoFit::Card
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Lane {
@@ -406,6 +437,8 @@ impl BeatKind {
     pub fn lane(&self) -> Lane {
         use BeatKind::*;
         match self {
+            // A full-frame clip does not take over the panel: what is under it keeps playing.
+            Video { fit: VideoFit::Frame, .. } => Lane::Overlay,
             Title { .. } | Bullets { .. } | Number { .. } | Image { .. } | Video { .. } | Code { .. } | Quote { .. } => Lane::Stage,
             Ring { .. } | Highlight { .. } | Arrow { .. } | Callout { .. } | Lower { .. } => Lane::Overlay,
             Blur { .. } | Zoom { .. } => Lane::Screen,

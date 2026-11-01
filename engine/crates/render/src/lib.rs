@@ -18,7 +18,7 @@ use cutroom_core::model::Source;
 use cutroom_core::spec::BeatKind;
 use cutroom_core::Plan;
 pub use encode::Codec;
-use frame::{Compositor, Ctx, Stats};
+use frame::{ClipInfo, Compositor, Ctx, Stats};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -82,9 +82,36 @@ pub fn dims(plan: &Plan, src: &Source, dir: &Path) -> Result<HashMap<String, (u3
     Ok(out)
 }
 
+/// Length and transparency of every `video` beat file (keyed like [`dims`]). Transparency is
+/// only probed for files some beat leaves `alpha` unset on.
+pub fn clips(plan: &Plan, dir: &Path) -> Result<HashMap<String, ClipInfo>> {
+    let mut out: HashMap<String, ClipInfo> = HashMap::new();
+    for b in &plan.beats {
+        if let BeatKind::Video { src: f, alpha, .. } = &b.kind {
+            let p = dir.join(f);
+            let key = p.display().to_string();
+            if !out.contains_key(&key) {
+                let (_, _, _, dur_ms) = feed::probe(&p)?;
+                out.insert(key.clone(), ClipInfo { alpha: false, dur_ms });
+            }
+            if alpha.is_none() {
+                let info = out.get_mut(&key).unwrap();
+                if !info.alpha {
+                    info.alpha = feed::probe_alpha(&p)?;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn ctx<'a>(plan: &'a Plan, src: &'a Source, segs: &'a [Seg], dir: &'a Path) -> Result<Ctx<'a>> {
+    Ok(Ctx { plan, src, segs, dir, dims: dims(plan, src, dir)?, clips: clips(plan, dir)? })
+}
+
 /// Draw one output frame (ms) to a pixmap.
 pub fn still(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, t_ms: f64) -> Result<cutroom_gfx::Pixmap> {
-    let ctx = Ctx { plan, src, segs, dir, dims: dims(plan, src, dir)? };
+    let ctx = ctx(plan, src, segs, dir)?;
     let mut c = Compositor::new(&ctx)?;
     let k = (t_ms * plan.fps / 1000.0).floor().max(0.0) as u64;
     c.frame(k)?;
@@ -94,8 +121,7 @@ pub fn still(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, t_ms: f64) -> 
 /// Several stills tiled into one image (cols x rows), each labelled by the caller's order.
 pub fn sheet(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, times: &[f64], cols: u32, thumb_w: u32) -> Result<cutroom_gfx::Pixmap> {
     use rayon::prelude::*;
-    let d = dims(plan, src, dir)?;
-    let ctx = Ctx { plan, src, segs, dir, dims: d };
+    let ctx = ctx(plan, src, segs, dir)?;
     let thumb_h = thumb_w * plan.height / plan.width;
     let frames: Vec<Vec<u8>> = times
         .par_iter()
@@ -149,7 +175,7 @@ pub fn render(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, opts: &Render
         p
     });
     std::fs::create_dir_all(&work)?;
-    let ctx = Ctx { plan, src, segs, dir, dims: dims(plan, src, dir)? };
+    let ctx = ctx(plan, src, segs, dir)?;
     let parts = chunks(f0, f1, opts.jobs, fps);
     let total_frames = f1 - f0;
     let done = std::sync::atomic::AtomicU64::new(0);

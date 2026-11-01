@@ -41,6 +41,9 @@ pub struct FeedKey {
     pub looped: bool,
     /// Decode on the VideoToolbox engines instead of the CPU.
     pub hw: bool,
+    /// Keep the clip's transparency: frames come out PREMULTIPLIED (what the compositor blends),
+    /// letterbox padding is transparent, and past the end the frame is clear, not dark.
+    pub alpha: bool,
 }
 
 pub struct Feed {
@@ -61,14 +64,25 @@ pub struct Feed {
 
 impl Feed {
     pub fn open(key: FeedKey, media_ms: f64, fps: f64, max_frames: u64) -> Result<Feed> {
+        Feed::open_at(key, media_ms, media_ms, fps, max_frames)
+    }
+
+    /// Like [`Feed::open`], but decoding starts at `seek_ms` of the file while the feed keeps
+    /// counting in caller time from `media_ms` (a looped clip re-entered mid-loop, or a clip held
+    /// on its last frame).
+    pub fn open_at(key: FeedKey, media_ms: f64, seek_ms: f64, fps: f64, max_frames: u64) -> Result<Feed> {
         let g = &key.geo;
+        // Alpha: premultiply in planar RGB BEFORE scaling, so the colour of fully transparent
+        // pixels (often garbage) never bleeds into the edges.
+        let pre = if key.alpha { "format=gbrap,premultiply=inplace=1," } else { "" };
+        let pad = if key.alpha { "black@0" } else { "0x161616" };
         let vf = if key.contain {
             format!(
-                "fps={fps}:round=near,crop={}:{}:{}:{},scale={}:{}:force_original_aspect_ratio=decrease:flags=bicubic,pad={}:{}:(ow-iw)/2:(oh-ih)/2:color=0x161616,format=rgba",
+                "fps={fps}:round=near,{pre}crop={}:{}:{}:{},scale={}:{}:force_original_aspect_ratio=decrease:flags=bicubic,pad={}:{}:(ow-iw)/2:(oh-ih)/2:color={pad},format=rgba",
                 g.crop[2], g.crop[3], g.crop[0], g.crop[1], g.w, g.h, g.w, g.h
             )
         } else {
-            format!("fps={fps}:round=near,crop={}:{}:{}:{},scale={}:{}:flags=bicubic,format=rgba", g.crop[2], g.crop[3], g.crop[0], g.crop[1], g.w, g.h)
+            format!("fps={fps}:round=near,{pre}crop={}:{}:{}:{},scale={}:{}:flags=bicubic,format=rgba", g.crop[2], g.crop[3], g.crop[0], g.crop[1], g.w, g.h)
         };
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-nostdin", "-v", "error"]);
@@ -81,7 +95,7 @@ impl Feed {
         if let Ok(v) = std::env::var("CUTROOM_THREADS") {
             cmd.args(["-threads", &v]);
         }
-        cmd.args(["-ss", &format!("{:.4}", (media_ms / 1000.0).max(0.0))])
+        cmd.args(["-ss", &format!("{:.4}", (seek_ms / 1000.0).max(0.0))])
             .arg("-i")
             .arg(&key.path)
             .args(["-an", "-sn", "-vf", &vf, "-frames:v", &max_frames.max(1).to_string(), "-f", "rawvideo", "-"])
@@ -92,10 +106,17 @@ impl Feed {
         let n = (g.w * g.h * 4) as usize;
         let (tx, rx) = sync_channel::<Vec<u8>>(PREFETCH);
         let (recycle, spent) = sync_channel::<Vec<u8>>(PREFETCH + 2);
+        let alpha = key.alpha;
         // read ahead on a thread so decoding overlaps compositing
         let reader = std::thread::spawn(move || loop {
             let mut buf = spent.try_recv().unwrap_or_else(|_| vec![0u8; n]);
-            if out.read_exact(&mut buf).is_err() || tx.send(buf).is_err() {
+            if out.read_exact(&mut buf).is_err() {
+                break;
+            }
+            if alpha {
+                clamp_premultiplied(&mut buf);
+            }
+            if tx.send(buf).is_err() {
                 break;
             }
         });
@@ -115,9 +136,10 @@ impl Feed {
                 Err(_) => {
                     self.eof = true;
                     if !self.have {
-                        // nothing decoded (past the media end): dark frame
+                        // nothing decoded (past the media end): dark frame, or clear with alpha
+                        let fill = if self.key.alpha { [0, 0, 0, 0] } else { [0x16, 0x16, 0x16, 255] };
                         for px in self.frame.as_chunks_mut::<4>().0 {
-                            px.copy_from_slice(&[0x16, 0x16, 0x16, 255]);
+                            px.copy_from_slice(&fill);
                         }
                     }
                 }
@@ -150,6 +172,54 @@ impl Drop for Feed {
             let _ = h.join();
         }
     }
+}
+
+/// Scaling premultiplied frames (bicubic) can overshoot a colour above its alpha at hard edges;
+/// clamp so every pixel is valid premultiplied RGBA.
+pub fn clamp_premultiplied(buf: &mut [u8]) {
+    for px in buf.as_chunks_mut::<4>().0 {
+        let a = px[3];
+        if a != 255 {
+            px[0] = px[0].min(a);
+            px[1] = px[1].min(a);
+            px[2] = px[2].min(a);
+        }
+    }
+}
+
+/// Whether a clip carries transparency: an alpha pixel format, an HEVC alpha layer (ffprobe
+/// reports those as plain `yuv420p` with two view ids), or a decoded sample frame that is not
+/// fully opaque.
+pub fn probe_alpha(path: &Path) -> Result<bool> {
+    let o = Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=pix_fmt,codec_name,view_ids_available", "-of", "default=nw=1"])
+        .arg(path)
+        .output()
+        .context("running ffprobe")?;
+    let s = String::from_utf8_lossy(&o.stdout);
+    let field = |k: &str| s.lines().find_map(|l| l.strip_prefix(k)).unwrap_or("").trim().to_string();
+    let pix = field("pix_fmt=");
+    if pix_fmt_has_alpha(&pix) {
+        return Ok(true);
+    }
+    if field("codec_name=") != "hevc" && !pix.is_empty() {
+        return Ok(false);
+    }
+    // HEVC with alpha: decode one small frame and look.
+    let o = Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-i"])
+        .arg(path)
+        .args(["-frames:v", "1", "-an", "-vf", "scale=64:-2,format=rgba", "-f", "rawvideo", "-"])
+        .stderr(Stdio::null())
+        .output()
+        .context("sampling a frame for alpha")?;
+    Ok(o.stdout.as_chunks::<4>().0.iter().any(|p| p[3] != 255))
+}
+
+/// Pixel formats with an alpha channel (`yuva444p12le`, `rgba`, `gbrap`, `argb`, `ya8`, ...).
+pub fn pix_fmt_has_alpha(pix: &str) -> bool {
+    let p = pix.to_ascii_lowercase();
+    p.starts_with("yuva") || p.starts_with("gbrap") || p.starts_with("ya") || ["rgba", "bgra", "argb", "abgr", "rgba64", "bgra64"].iter().any(|f| p.starts_with(f))
 }
 
 /// ffprobe: (width, height, fps, duration ms) of the first video stream.
@@ -185,4 +255,26 @@ pub fn probe(path: &Path) -> Result<(u32, u32, f64, f64)> {
         return Err(anyhow!("{}: no video stream", path.display()));
     }
     Ok((w, h, fps, dur))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamps_overshoot_and_keeps_valid_pixels() {
+        let mut b = vec![200, 10, 90, 100, 255, 255, 255, 255, 30, 40, 50, 0];
+        clamp_premultiplied(&mut b);
+        assert_eq!(b, vec![100, 10, 90, 100, 255, 255, 255, 255, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn alpha_pixel_formats() {
+        for p in ["yuva444p12le", "yuva420p", "rgba", "bgra", "argb", "gbrap10le", "ya8"] {
+            assert!(pix_fmt_has_alpha(p), "{p}");
+        }
+        for p in ["yuv420p", "yuv444p10le", "rgb24", "nv12", "gbrp"] {
+            assert!(!pix_fmt_has_alpha(p), "{p}");
+        }
+    }
 }

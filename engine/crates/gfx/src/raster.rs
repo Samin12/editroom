@@ -116,6 +116,17 @@ pub struct ImgRef<'a> {
     pub data: &'a [u8],
 }
 
+/// Quick opacity test for a decoded frame: a sparse grid of samples (and every corner pixel)
+/// all fully opaque.
+pub fn looks_opaque(data: &[u8]) -> bool {
+    let px = data.len() / 4;
+    if px == 0 {
+        return true;
+    }
+    let step = (px / 509).max(1);
+    [0, px - 1].into_iter().chain((0..px).step_by(step)).all(|i| data[i * 4 + 3] == 255)
+}
+
 #[inline(always)]
 pub fn div255(x: u32) -> u32 {
     (x + 128 + ((x + 128) >> 8)) >> 8

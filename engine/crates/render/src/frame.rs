@@ -5,7 +5,8 @@ use crate::feed::{cover, Feed, FeedKey, Geometry};
 use anyhow::Result;
 use cutroom_core::compose::Seg;
 use cutroom_core::model::{Clip, Source};
-use cutroom_core::spec::{BeatKind, Fit, Lane, LayoutMode, RectN};
+use cutroom_core::resolve::ResolvedBeat;
+use cutroom_core::spec::{BeatKind, Fit, Lane, LayoutMode, RectN, VideoFit};
 use cutroom_core::Plan;
 use cutroom_gfx::{Gfx, Pixmap, Rect, ScreenMap, Theme};
 use std::collections::HashMap;
@@ -20,6 +21,16 @@ pub struct Ctx<'a> {
     pub dir: &'a Path,
     /// media id or beat file path -> (width, height)
     pub dims: HashMap<String, (u32, u32)>,
+    /// `video` beat file path (keyed like `dims`) -> transparency and length.
+    pub clips: HashMap<String, ClipInfo>,
+}
+
+/// What the renderer knows about a `video` beat's file.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ClipInfo {
+    /// The file carries transparency (used when the beat does not say `alpha:`).
+    pub alpha: bool,
+    pub dur_ms: f64,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -65,6 +76,8 @@ pub struct Compositor<'a> {
     screen: Option<Feed>,
     camera: Option<Feed>,
     stage_video: Option<Feed>,
+    /// Decoder for the `fit: frame` video beat on screen.
+    frame_video: Option<Feed>,
     zbuf: Vec<u8>,
     seg_i: usize,
     active: Vec<usize>,
@@ -96,6 +109,7 @@ impl<'a> Compositor<'a> {
             screen: None,
             camera: None,
             stage_video: None,
+            frame_video: None,
             zbuf: vec![],
             seg_i: 0,
             active: vec![],
@@ -138,14 +152,20 @@ impl<'a> Compositor<'a> {
     /// Pull the frame of `clip` at source time `s` from feed `slot` with geometry `geo`.
     #[allow(clippy::too_many_arguments)]
     fn pull(slot: &mut Option<Feed>, stats: &mut Stats, path: PathBuf, geo: Geometry, contain: bool, looped: bool, hw: bool, media_ms: f64, remaining_ms: f64, fps: f64) -> Result<()> {
-        let key = FeedKey { path, geo, contain, looped, hw };
+        let key = FeedKey { path, geo, contain, looped, hw, alpha: false };
+        Self::pull_key(slot, stats, key, media_ms, media_ms, remaining_ms, fps)
+    }
+
+    /// [`Self::pull`] with a full key; a reopened feed decodes from `seek_ms` of the file.
+    fn pull_key(slot: &mut Option<Feed>, stats: &mut Stats, key: FeedKey, media_ms: f64, seek_ms: f64, remaining_ms: f64, fps: f64) -> Result<()> {
         let reuse = match slot {
             Some(f) if f.key == key => f.advance_to(media_ms, MAX_SKIP_MS),
             _ => false,
         };
         if !reuse {
             let frames = (remaining_ms * fps / 1000.0).ceil().max(1.0) as u64 + 2;
-            *slot = Some(Feed::open(key, media_ms, fps, if looped { u64::MAX / 4 } else { frames })?);
+            let looped = key.looped;
+            *slot = Some(Feed::open_at(key, media_ms, seek_ms, fps, if looped { u64::MAX / 4 } else { frames })?);
             stats.feeds_opened += 1;
         }
         Ok(())
@@ -263,23 +283,30 @@ impl<'a> Compositor<'a> {
         // ---- stage beat in the panel ----
         if let (Some(b), LayoutMode::Panel | LayoutMode::Screen) = (stage, seg.mode) {
             let panel = if seg.mode == LayoutMode::Panel { rect(self.panel) } else { rect([0, 0, self.w as i32, self.h as i32]) };
-            let mut media: Option<Pixmap> = None;
-            if let BeatKind::Video { src: file, from, .. } = &b.kind {
-                let path = self.ctx.dir.join(file);
-                let (sw, sh) = self.dims(&path.display().to_string());
-                let (mw, mh) = self.gfx.stage_media_size(panel);
-                let geo = Geometry { crop: [0, 0, sw & !1, sh & !1], w: mw, h: mh };
-                let m = from.unwrap_or(0.0) * 1000.0 + (t - b.start_ms);
-                let d0 = Instant::now();
-                Self::pull(&mut self.stage_video, &mut self.stats, path, geo, true, true, false, m, b.end_ms - t, fps)?;
-                let f = self.stage_video.as_mut().unwrap().next_frame();
-                dec += d0.elapsed().as_nanos();
-                let mut p = Pixmap::new(mw, mh).unwrap();
-                p.data_mut().copy_from_slice(f);
-                media = Some(p);
+            if let BeatKind::Video { fit: VideoFit::Panel, .. } = &b.kind {
+                dec += self.video_panel(b, seg.mode, t)?;
+            } else {
+                let mut media: Option<Pixmap> = None;
+                if let Some(p) = self.play(b, t) {
+                    // `fit: card`: decoded letterboxed at the card size; gfx draws the card
+                    let (sw, sh) = self.dims(&p.key);
+                    let (mw, mh) = self.gfx.stage_media_size(panel);
+                    let geo = Geometry { crop: [0, 0, sw & !1, sh & !1], w: mw, h: mh };
+                    let key = FeedKey { path: p.path, geo, contain: true, looped: p.looped, hw: false, alpha: p.alpha };
+                    let d0 = Instant::now();
+                    Self::pull_key(&mut self.stage_video, &mut self.stats, key, p.media_ms, p.seek_ms, p.remaining_ms, fps)?;
+                    let f = self.stage_video.as_mut().unwrap().next_frame();
+                    dec += d0.elapsed().as_nanos();
+                    let mut px = Pixmap::new(mw, mh).unwrap();
+                    px.data_mut().copy_from_slice(f);
+                    media = Some(px);
+                }
+                self.gfx.stage(&mut self.pm, panel, b, t, media.as_ref());
             }
-            self.gfx.stage(&mut self.pm, panel, b, t, media.as_ref());
         }
+
+        // ---- full-frame video beat (fit: frame): over the screen and stage, under the camera ----
+        dec += self.video_frame(t)?;
 
         // ---- camera ----
         if let (Some(c), Some(s)) = (cam_clip, s) {
@@ -319,7 +346,7 @@ impl<'a> Compositor<'a> {
         // ---- overlays ----
         for &i in &self.active {
             let b = &plan.beats[i];
-            if b.lane != Lane::Overlay {
+            if b.lane != Lane::Overlay || matches!(b.kind, BeatKind::Video { .. }) {
                 continue;
             }
             let needs_screen = matches!(b.kind, BeatKind::Ring { .. } | BeatKind::Highlight { .. } | BeatKind::Arrow { .. });
@@ -343,7 +370,7 @@ impl<'a> Compositor<'a> {
         if let Some(ci) = seg.card {
             self.gfx.chapter_card(&mut self.pm, &plan.chapters[ci], plan.chapters.len(), t);
         }
-        let _ = (&self.screen, &self.stage_video);
+        let _ = (&self.screen, &self.stage_video, &self.frame_video);
         self.stats.frames += 1;
         self.stats.decode_ns += dec;
         self.stats.compose_ns += t0.elapsed().as_nanos() - dec;
@@ -360,6 +387,99 @@ impl<'a> Compositor<'a> {
             }
         }
         (None, 0.0)
+    }
+}
+
+// ------------------------------------------------------------------------- video beats
+// `fit: card | panel | frame`, `alpha`, `loop`. Card clips go through gfx (the card look);
+// panel and frame clips are composited here, premultiplied, with a short fade at each end.
+
+/// Fade in and out of `panel` / `frame` clips (ms).
+const CLIP_FADE_MS: f64 = 180.0;
+
+/// One video beat at one output instant.
+struct Play {
+    path: PathBuf,
+    /// `dims` / `clips` key.
+    key: String,
+    alpha: bool,
+    looped: bool,
+    /// Clip time the frame is for (caller time; keeps counting through loops).
+    media_ms: f64,
+    /// Where a (re)opened decoder starts in the file.
+    seek_ms: f64,
+    remaining_ms: f64,
+    opacity: f32,
+}
+
+impl<'a> Compositor<'a> {
+    /// The clip, timing and blend of video beat `b` at `t` (None for other kinds).
+    fn play(&self, b: &ResolvedBeat, t: f64) -> Option<Play> {
+        let BeatKind::Video { src: file, from, fit, alpha, looped, .. } = &b.kind else { return None };
+        let path = self.ctx.dir.join(file);
+        let key = path.display().to_string();
+        let info = self.ctx.clips.get(&key).copied().unwrap_or_default();
+        let looped = looped.unwrap_or(fit.loops_by_default());
+        let media_ms = from.unwrap_or(0.0) * 1000.0 + (t - b.start_ms);
+        let frame_ms = 1000.0 / self.ctx.plan.fps;
+        let seek_ms = match (looped, info.dur_ms > 0.0) {
+            (true, true) => media_ms.rem_euclid(info.dur_ms),
+            // past the end: decode the last frames and hold them
+            (false, true) => media_ms.min((info.dur_ms - 2.0 * frame_ms).max(0.0)),
+            _ => media_ms,
+        };
+        let opacity = if *fit == VideoFit::Card { 1.0 } else { ((t - b.start_ms).min(b.end_ms - t) / CLIP_FADE_MS).clamp(0.0, 1.0) as f32 };
+        Some(Play { path, key, alpha: alpha.unwrap_or(info.alpha), looped, media_ms, seek_ms, remaining_ms: b.end_ms - t, opacity })
+    }
+
+    /// `fit: panel`: the clip fills the panel slot (cover), rounded like the screen recording.
+    /// Returns the decode wait (ns).
+    fn video_panel(&mut self, b: &ResolvedBeat, mode: LayoutMode, t: f64) -> Result<u128> {
+        let Some(p) = self.play(b, t) else { return Ok(0) };
+        let full = mode != LayoutMode::Panel;
+        let r = if full { [0, 0, self.w as i32, self.h as i32] } else { self.panel };
+        let (sw, sh) = self.dims(&p.key);
+        let geo = cover(sw, sh, None, r[2] as u32, r[3] as u32);
+        if p.alpha || p.opacity < 1.0 {
+            self.gfx.panel_surface(&mut self.pm, rect(r), t);
+        }
+        let (w, h) = (geo.w, geo.h);
+        let key = FeedKey { path: p.path, geo, contain: false, looped: p.looped, hw: false, alpha: p.alpha };
+        let d0 = Instant::now();
+        Self::pull_key(&mut self.stage_video, &mut self.stats, key, p.media_ms, p.seek_ms, p.remaining_ms, self.ctx.plan.fps)?;
+        let f = self.stage_video.as_mut().unwrap().next_frame();
+        let dec = d0.elapsed().as_nanos();
+        let mask = if full { None } else { Some(&self.panel_mask) };
+        if p.alpha || p.opacity < 1.0 {
+            blit::blend_over(&mut self.pm, r[0], r[1], f, w, h, p.opacity, mask);
+        } else {
+            blit::blit_rounded(&mut self.pm, r[0], r[1], f, w, h, mask);
+        }
+        Ok(dec)
+    }
+
+    /// `fit: frame`: the latest-starting full-frame clip on screen, over everything drawn so far.
+    /// Returns the decode wait (ns).
+    fn video_frame(&mut self, t: f64) -> Result<u128> {
+        let plan = self.ctx.plan;
+        let Some(b) = self.active.iter().rev().map(|&i| &plan.beats[i]).find(|b| matches!(b.kind, BeatKind::Video { fit: VideoFit::Frame, .. })) else {
+            return Ok(0);
+        };
+        let Some(p) = self.play(b, t) else { return Ok(0) };
+        let (sw, sh) = self.dims(&p.key);
+        let geo = cover(sw, sh, None, self.w, self.h);
+        let (w, h) = (geo.w, geo.h);
+        let key = FeedKey { path: p.path, geo, contain: false, looped: p.looped, hw: false, alpha: p.alpha };
+        let d0 = Instant::now();
+        Self::pull_key(&mut self.frame_video, &mut self.stats, key, p.media_ms, p.seek_ms, p.remaining_ms, plan.fps)?;
+        let f = self.frame_video.as_mut().unwrap().next_frame();
+        let dec = d0.elapsed().as_nanos();
+        if p.alpha || p.opacity < 1.0 {
+            blit::blend_over(&mut self.pm, 0, 0, f, w, h, p.opacity, None);
+        } else {
+            blit::blit_rounded(&mut self.pm, 0, 0, f, w, h, None);
+        }
+        Ok(dec)
     }
 }
 

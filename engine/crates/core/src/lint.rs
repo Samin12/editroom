@@ -3,7 +3,7 @@
 use crate::compose::{empty_panel_ranges, Seg};
 use crate::model::Source;
 use crate::resolve::{clock, Issue, Plan, Severity};
-use crate::spec::{BeatKind, EmptyPanel, Lane, LayoutMode, RectN};
+use crate::spec::{BeatKind, EmptyPanel, Lane, LayoutMode, RectN, VideoFit};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -64,6 +64,17 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
             out.push(issue(Severity::Warn, Some(w[1].start_ms), format!("{} ({}) starts before {} ({}) ends: it cuts the earlier one short", w[1].kind.name(), w[1].origin, w[0].kind.name(), w[0].origin)));
         }
     }
+    let full: Vec<_> = plan.beats.iter().filter(|b| matches!(b.kind, BeatKind::Video { fit: VideoFit::Frame, .. })).collect();
+    for w in full.windows(2) {
+        if w[1].start_ms < w[0].end_ms - 1.0 {
+            out.push(issue(Severity::Warn, Some(w[1].start_ms), format!("full-frame video ({}) starts before the one from {} ends: only the later one shows", w[1].origin, w[0].origin)));
+        }
+    }
+    if let Some(m) = &plan.output.music {
+        if !spec_dir.join(&m.src).exists() {
+            out.push(issue(Severity::Error, None, format!("output.music: file {:?} not found", m.src)));
+        }
+    }
     for b in &plan.beats {
         let d = b.end_ms - b.start_ms;
         if b.lane == Lane::Stage && d < 1500.0 {
@@ -76,6 +87,11 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
         if let Some(p) = path {
             if !spec_dir.join(p).exists() {
                 out.push(issue(Severity::Error, Some(b.start_ms), format!("{} ({}): file {p:?} not found", b.kind.name(), b.origin)));
+            }
+        }
+        if let BeatKind::Video { fit, caption: Some(_), .. } = &b.kind {
+            if *fit != VideoFit::Card {
+                out.push(issue(Severity::Warn, Some(b.start_ms), format!("video ({}): the caption only shows with fit: card", b.origin)));
             }
         }
         // overlays on the screen need the screen to be visible
