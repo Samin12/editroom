@@ -1,0 +1,22 @@
+[package]
+name = "cutroom"
+description = "Agentic video editor engine: word-anchored edits, native motion graphics, parallel render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cutroom"
+path = "src/main.rs"
+
+[dependencies]
+cutroom-core.workspace = true
+cutroom-ingest.workspace = true
+cutroom-cut.workspace = true
+cutroom-privacy.workspace = true
+cutroom-render.workspace = true
+cutroom-gfx.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+clap = { version = "4", features = ["derive"] }

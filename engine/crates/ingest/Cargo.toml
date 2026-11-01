@@ -1,0 +1,17 @@
+[package]
+name = "cutroom-ingest"
+description = "Read a raw Borumi project, or plain files, into a cutroom Source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cutroom-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }

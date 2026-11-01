@@ -1,0 +1,8 @@
+/target
+*.mp4
+*.mov
+*.wav
+/work*/
+/out*/
+.DS_Store
+/target*
