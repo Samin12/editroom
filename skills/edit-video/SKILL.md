@@ -115,6 +115,8 @@ Reply to Samin, short and speakable:
 - `S status` shows a rendered version with check `-` although the workflow reported it passed: the checker returned its
   verdict without writing `checks/check-v<N>.json`. Write that file from the workflow's journal result (the checker's
   JSON plus `key` and `version`) instead of re-running the slot.
+- Hand-confirmed blurs live in `W/beats/review-privacy.yaml`, anchored to source time (`s:`). Several agents add to
+  it: APPEND (read it first, keep every line); never overwrite it and never delete a blur beat.
 - A stage fails twice the same way: stop and tell Samin what broke (an error, not a question).
 - `references/troubleshooting.md` covers the engine, the pipeline and gates; `references/studio.md` covers the
   studio files and commands in detail.

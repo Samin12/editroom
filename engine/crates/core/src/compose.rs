@@ -63,7 +63,8 @@ pub fn segments(plan: &Plan, src: &Source) -> Vec<Seg> {
         }
     }
     for b in &plan.beats {
-        if matches!(b.lane, Lane::Stage | Lane::Layout) || b.kind.is_film() {
+        // every full-frame clip splits the stretch (overlays too: they keep the panel layout)
+        if matches!(b.lane, Lane::Stage | Lane::Layout) || matches!(b.kind, BeatKind::Video { fit: crate::spec::VideoFit::Frame, .. }) {
             cuts.push(b.start_ms);
             cuts.push(b.end_ms);
         }
@@ -75,6 +76,16 @@ pub fn segments(plan: &Plan, src: &Source) -> Vec<Seg> {
         }
     }
     cuts.retain(|t| *t >= 0.0 && *t <= plan.duration_ms());
+    // A boundary a rounding error past a frame (773100.0000000001 for the frame at 773100) would hand
+    // that frame to the previous segment: one stray frame of the wrong picture. Snap near-frame
+    // boundaries onto the frame.
+    for t in cuts.iter_mut() {
+        // the renderer's own frame clock (`k * 1000 / fps`), so a snapped boundary equals a frame time
+        let f = (*t * plan.fps / 1000.0).round() * 1000.0 / plan.fps;
+        if (*t - f).abs() < 1e-3 {
+            *t = f;
+        }
+    }
     cuts.sort_by(|a, b| a.total_cmp(b));
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
 
@@ -115,12 +126,15 @@ pub fn segments(plan: &Plan, src: &Source) -> Vec<Seg> {
         let in_gap = smid.is_none();
         // an opaque full-frame film fills the picture: nothing is "empty" under it
         let film = plan.beats.iter().any(|x| x.kind.is_film() && x.start_ms <= mid && mid < x.end_ms);
+        // any full-frame clip, transparent overlays included: it was designed for the panel layout
+        // (camera in its tile), so the layout must not jump to full-frame camera under it
+        let frame_clip = plan.beats.iter().any(|x| matches!(x.kind, BeatKind::Video { fit: crate::spec::VideoFit::Frame, .. }) && x.start_ms <= mid && mid < x.end_ms);
         let empty_panel = !in_gap && requested == LayoutMode::Panel && screen.is_none() && stage.is_none() && !film;
         let mut mode = requested;
-        if empty_panel && plan.layout.empty_panel == EmptyPanel::Camera {
+        if empty_panel && plan.layout.empty_panel == EmptyPanel::Camera && !frame_clip {
             mode = LayoutMode::Camera;
         }
-        if mode == LayoutMode::Screen && screen.is_none() && stage.is_none() && !in_gap && !film {
+        if mode == LayoutMode::Screen && screen.is_none() && stage.is_none() && !in_gap && !frame_clip {
             mode = LayoutMode::Camera;
         }
         let seg = Seg { out0: a, out1: b, src0, requested, mode, card, stage, screen, camera, empty_panel };

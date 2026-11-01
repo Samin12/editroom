@@ -304,7 +304,10 @@ beats:
     assert_eq!(at(1500.0).mode, cutroom_core::spec::LayoutMode::Panel);
     assert!(!at(1500.0).empty_panel);
     assert_eq!(at(500.0).mode, cutroom_core::spec::LayoutMode::Camera);
-    assert_eq!(at(4500.0).mode, cutroom_core::spec::LayoutMode::Camera, "a transparent overlay does not fill the panel");
+    // a transparent overlay does not fill the panel (it is still "empty"), but it was designed for the
+    // panel layout, so the camera stays a tile instead of flashing full frame under it
+    assert_eq!(at(4500.0).mode, cutroom_core::spec::LayoutMode::Panel);
+    assert!(at(4500.0).empty_panel, "a transparent overlay does not fill the panel");
     assert!(plan.beats.iter().any(|b| b.kind.is_film()));
     // a film that leaves `alpha` out counts too (only `alpha: true` marks an overlay)
     let (plan, src, _) = plan_for(

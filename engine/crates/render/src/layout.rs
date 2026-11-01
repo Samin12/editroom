@@ -60,6 +60,9 @@ pub fn layout_segments(plan: &Plan, src: &Source, segs: &[Seg]) -> Vec<LayoutSeg
         let mut edges = vec![s.out0, s.out1];
         for b in &fv {
             for e in [b.start_ms, b.end_ms] {
+                // the same frame snap compose uses, so no sliver between a boundary and a beat edge
+                let f = (e * plan.fps / 1000.0).round() * 1000.0 / plan.fps;
+                let e = if (e - f).abs() < 1e-3 { f } else { e };
                 if e > s.out0 && e < s.out1 {
                     edges.push(e);
                 }

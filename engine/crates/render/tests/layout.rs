@@ -95,3 +95,38 @@ fn layout_segments_report_what_is_drawn() {
     let s = at(&segs, out(49));
     assert_eq!((s.mode, s.camera_rect, s.screen_rect), ("screen", None, full));
 }
+
+#[test]
+fn overlays_keep_the_panel_and_boundaries_snap_to_frames() {
+    // a transparent full-frame overlay that starts before the screen recording: the layout stays
+    // panel (camera in its tile) instead of flashing the full-frame camera; and a beat that starts a
+    // rounding error after a frame still owns that frame
+    let dir = std::env::temp_dir().join("cutroom-layout-overlay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = source();
+    src.save(&dir.join("source.json")).unwrap();
+    std::fs::write(
+        dir.join("edit.yaml"),
+        r#"
+source: source.json
+output: {height: 1080, fps: 30}
+beats:
+  - {at: "o:2", lead: 0, hold: 4s, kind: video, src: over.mov, fit: frame, alpha: true}
+  - {at: "o:8.0000000000001", lead: 0, hold: 2s, kind: title, text: "Late by a hair"}
+"#,
+    )
+    .unwrap();
+    let plan = build(&spec::load(&dir.join("edit.yaml")).unwrap(), &src);
+    assert_eq!(plan.errors(), 0, "{:?}", plan.issues);
+    let segs = layout_segments(&plan, &src, &segments(&plan, &src));
+    let (_, tile) = slots(&plan);
+    // no overlay yet: the empty panel is the full camera, as before
+    assert_eq!(at(&segs, 1_000.0).mode, "camera");
+    // under the overlay, before the screen starts at 4 s: panel with the camera tile
+    let s = at(&segs, 2_000.0);
+    assert_eq!((s.mode, s.camera_rect, s.frame_video.as_deref()), ("panel", Some(tile), Some("over.mov")));
+    let s = at(&segs, 3_500.0);
+    assert_eq!((s.mode, s.camera_rect), ("panel", Some(tile)));
+    // the frame at exactly 8000 ms shows the title
+    assert_eq!(at(&segs, 8_000.0).stage, Some("title"));
+}

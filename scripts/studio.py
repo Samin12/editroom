@@ -714,7 +714,7 @@ def cmd_wire(a):
             continue
         # start a hair (1 us) before the slot's first frame, as `cutroom slots` does, so time rounding can
         # never drop frame 0
-        beat = {"at": f"o:{(s['slot0'] - 0.001) / 1000.0:.7f}", "hold": f"{s['frames'] * 1000.0 / FPS:.4f}ms", "lead": 0, "kind": "video",
+        beat = {"at": f"o:{max(0.0, s['slot0'] - 0.001) / 1000.0:.7f}", "hold": f"{s['frames'] * 1000.0 / FPS:.4f}ms", "lead": 0, "kind": "video",
                 "src": os.path.relpath(st["render"], w), "fit": "frame", "loop": False}
         if s["mode"] == "front":
             beat["alpha"] = True
