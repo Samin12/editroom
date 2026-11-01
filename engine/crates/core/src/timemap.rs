@@ -151,9 +151,17 @@ impl TimeMap {
     }
 
     /// The piece playing at output time `o`.
+    ///
+    /// Looked up by START: a piece's stored `out0` is exactly where the previous one ended, but its
+    /// computed `out1()` (`out0 + (src1 - src0)`) can round a hair past that instant. Searching by
+    /// `out1` then hands the first instant of a piece to the previous one, so the frame right after
+    /// a cut maps to the END of the removed range instead of the start of the kept one.
     pub fn piece_at(&self, o: f64) -> Option<&Piece> {
-        let i = self.pieces.partition_point(|p| p.out1() <= o);
-        self.pieces.get(i)
+        if o >= self.duration_ms {
+            return None;
+        }
+        let i = self.pieces.partition_point(|p| p.out0() <= o);
+        self.pieces.get(i.saturating_sub(1))
     }
 
     /// Source time at output time `o` (None inside a gap or past the end).
@@ -213,6 +221,27 @@ mod tests {
             let f = p.out0() * fps / 1000.0;
             assert!((f - f.round()).abs() < 1e-6, "piece starts off-grid at {}", p.out0());
         }
+    }
+
+    /// Cut points whose accumulated output times round badly: the computed end of a piece lands
+    /// a hair past the stored start of the next one. The next piece must still own that instant.
+    #[test]
+    fn piece_starts_belong_to_their_piece() {
+        let cuts: Vec<(f64, f64)> = (0..400).map(|i| (i as f64 * 1733.3 + 900.6, i as f64 * 1733.3 + 1210.7)).collect();
+        let m = TimeMap::build(700_000.0, 30.0, &cuts, &[(50_000.3, 1800.0, 0)]);
+        let mut unlucky = 0;
+        for w in m.pieces.windows(2) {
+            if w[0].out1() > w[1].out0() {
+                unlucky += 1;
+            }
+            assert_eq!(m.piece_at(w[1].out0()), Some(&w[1]), "boundary {}", w[1].out0());
+            if let Piece::Src { src0, .. } = w[1] {
+                assert_eq!(m.to_src(w[1].out0()), Some(src0), "the first frame after a cut shows the kept start");
+            }
+        }
+        assert!(unlucky > 0, "fixture should contain rounding-unlucky boundaries");
+        assert_eq!(m.piece_at(m.duration_ms), None);
+        assert_eq!(m.piece_at(m.duration_ms - 0.001), m.pieces.last());
     }
 
     #[test]

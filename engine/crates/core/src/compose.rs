@@ -85,7 +85,10 @@ pub fn segments(plan: &Plan, src: &Source) -> Vec<Seg> {
             continue;
         }
         let mid = (a + b) / 2.0;
-        let src0 = plan.map.to_src(a).or_else(|| plan.map.to_src(mid).map(|s| s - (mid - a)));
+        // From the middle, never from `a`: boundaries can sit a rounding error before or after the
+        // piece they start, and `a` would then read the END of the previous piece. The continuity
+        // check below would take that for continuous source and merge across the cut.
+        let src0 = plan.map.to_src(mid).map(|s| s - (mid - a));
         let card = plan.chapters.iter().position(|c| c.card.map(|(x, y)| mid >= x && mid < y).unwrap_or(false));
         // inserted cards fill a gap; overlay cards are drawn over the segment
         let stage = plan
