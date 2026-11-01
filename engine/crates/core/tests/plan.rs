@@ -33,7 +33,9 @@ fn source() -> Source {
 fn plan_for(yaml: &str) -> (cutroom_core::Plan, Source, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("cutroom-core-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let p = dir.join(format!("edit-{}.yaml", yaml.len()));
+    // unique per call: tests run in parallel and two specs can have the same length
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let p = dir.join(format!("edit-{}.yaml", N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
     std::fs::File::create(&p).unwrap().write_all(yaml.as_bytes()).unwrap();
     let loaded = spec::load(&p).unwrap();
     let src = source();
@@ -242,4 +244,76 @@ fn numbered_kickers_follow_the_chapter_order() {
     assert_eq!(cutroom_core::lint::numbered("Step 3: paste", "Step"), Some(("step".into(), 3)));
     assert_eq!(cutroom_core::lint::numbered("Steps 3", "Step"), None);
     assert_eq!(cutroom_core::lint::numbered("TIP 12", "tip"), Some(("tip".into(), 12)));
+}
+
+#[test]
+fn chapter_groups_put_cards_on_group_starts() {
+    let (plan, _, _) = plan_for(
+        r#"
+output: {chapter_cards: insert, card_ms: 1500, kicker: Tip}
+chapters:
+  - {at: w11, title: One, group: The Easy Tips}
+  - {at: "first open the board", title: Two, group: The Easy Tips}
+  - {at: "then paste your key", title: Three, group: The Hard Tips}
+"#,
+    );
+    assert_eq!(plan.errors(), 0, "{:?}", plan.issues);
+    let c = &plan.chapters;
+    let g: Vec<_> = c.iter().map(|x| x.group.clone().unwrap()).collect();
+    assert_eq!((g[0].n, g[0].of, g[0].first, g[0].last), (1, 2, 1, 2));
+    assert_eq!((g[2].n, g[2].of, g[2].first, g[2].last), (2, 2, 3, 3));
+    // cards only where a group starts, showing the group
+    assert!(c[0].card.is_some() && g[0].card);
+    assert!(c[1].card.is_none() && !g[1].card);
+    assert!(c[2].card.is_some() && g[2].card);
+    // only two inserted cards of 1.5 s lengthen the video
+    let gaps: f64 = plan.map.pieces.iter().filter_map(|p| match *p {
+        cutroom_core::timemap::Piece::Gap { dur, .. } => Some(dur),
+        _ => None,
+    }).sum();
+    assert!((gaps - 3000.0).abs() < 1e-6, "{gaps}");
+
+    // card_on: chapter keeps a card per chapter even with groups
+    let (plan, _, _) = plan_for(
+        r#"
+output: {chapter_cards: insert, card_on: chapter}
+chapters:
+  - {at: w11, title: One, group: A}
+  - {at: "first open the board", title: Two, group: A}
+"#,
+    );
+    assert!(plan.chapters.iter().all(|c| c.card.is_some()));
+    // no groups: defaults unchanged
+    let (plan, _, _) = plan_for("chapters:\n  - {at: \"first open the board\", title: Two}\n");
+    assert!(plan.chapters[0].group.is_none() && plan.chapters[0].card.is_some());
+}
+
+#[test]
+fn opaque_films_fill_the_panel() {
+    // the first half has no screen recording: an empty panel shows the full camera, unless an
+    // opaque full-frame film covers it (then the camera stays a tile)
+    let (plan, src, _) = plan_for(
+        r#"
+beats:
+  - {at: "o:1.0", lead: 0, hold: 2s, kind: video, src: film.mp4, fit: frame, alpha: false, fade: false}
+  - {at: "o:4.0", lead: 0, hold: 2s, kind: video, src: over.mov, fit: frame, alpha: true}
+"#,
+    );
+    let segs = segments(&plan, &src);
+    let at = |t: f64| segs.iter().find(|s| s.out0 <= t && t < s.out1).unwrap();
+    assert_eq!(at(1500.0).mode, cutroom_core::spec::LayoutMode::Panel);
+    assert!(!at(1500.0).empty_panel);
+    assert_eq!(at(500.0).mode, cutroom_core::spec::LayoutMode::Camera);
+    assert_eq!(at(4500.0).mode, cutroom_core::spec::LayoutMode::Camera, "a transparent overlay does not fill the panel");
+    assert!(plan.beats.iter().any(|b| b.kind.is_film()));
+    // a film that leaves `alpha` out counts too (only `alpha: true` marks an overlay)
+    let (plan, src, _) = plan_for(
+        r#"
+beats:
+  - {at: "o:0.0", lead: 0, hold: 3s, kind: video, src: intro.mp4, fit: frame, loop: false}
+"#,
+    );
+    let segs = segments(&plan, &src);
+    let s = segs.iter().find(|s| s.out0 <= 1500.0 && 1500.0 < s.out1).unwrap();
+    assert_eq!(s.mode, cutroom_core::spec::LayoutMode::Panel);
 }

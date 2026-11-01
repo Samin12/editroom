@@ -106,6 +106,48 @@ pub fn clips(plan: &Plan, dir: &Path) -> Result<HashMap<String, ClipInfo>> {
     Ok(out)
 }
 
+/// Output frames an output window `[start, end)` (ms) samples at `fps`.
+pub fn window_frames(start_ms: f64, end_ms: f64, fps: f64) -> (u64, u64) {
+    let k = |t: f64| (t * fps / 1000.0 - 1e-6).ceil().max(0.0) as u64;
+    (k(start_ms), k(end_ms))
+}
+
+/// Frame-exact films (`video` beats with `fade: false`) must match their window: an error when
+/// the file is more than 2 frames shorter or longer than the frames its beat covers, a warning
+/// when it plays at another frame rate.
+pub fn film_issues(plan: &Plan, dir: &Path) -> Vec<cutroom_core::resolve::Issue> {
+    use cutroom_core::resolve::{clock, Issue, Severity};
+    let mut out = vec![];
+    for b in &plan.beats {
+        let BeatKind::Video { src: f, fade: Some(false), .. } = &b.kind else { continue };
+        let p = dir.join(f);
+        if !p.exists() {
+            continue; // `check` already reports a missing file
+        }
+        let (k0, k1) = window_frames(b.start_ms, b.end_ms, plan.fps);
+        let want = k1.saturating_sub(k0) as i64;
+        match feed::probe_frames(&p) {
+            Ok((n, fps, _)) => {
+                let d = n as i64 - want;
+                if d.abs() > 2 {
+                    out.push(Issue {
+                        sev: Severity::Error,
+                        at_ms: Some(b.start_ms),
+                        msg: format!("film {f:?} ({}) has {n} frames, its window at {} has {want}: re-render it at the slot's `frames` (`cutroom slots`) or fix the beat's hold", b.origin, clock(b.start_ms)),
+                    });
+                } else if d != 0 {
+                    out.push(Issue { sev: Severity::Info, at_ms: Some(b.start_ms), msg: format!("film {f:?} is {} frame{} {} than its window ({want}); {}", d.abs(), if d.abs() == 1 { "" } else { "s" }, if d < 0 { "shorter" } else { "longer" }, if d < 0 { "the last frame holds" } else { "the extra frames are dropped" }) });
+                }
+                if (fps - plan.fps).abs() > 0.01 {
+                    out.push(Issue { sev: Severity::Warn, at_ms: Some(b.start_ms), msg: format!("film {f:?} runs at {fps:.3} fps, the edit at {}: frames will be dropped or repeated", plan.fps) });
+                }
+            }
+            Err(e) => out.push(Issue { sev: Severity::Error, at_ms: Some(b.start_ms), msg: format!("film {f:?}: {e}") }),
+        }
+    }
+    out
+}
+
 fn ctx<'a>(plan: &'a Plan, src: &'a Source, segs: &'a [Seg], dir: &'a Path) -> Result<Ctx<'a>> {
     Ok(Ctx { plan, src, segs, dir, dims: dims(plan, src, dir)?, clips: clips(plan, dir)? })
 }
