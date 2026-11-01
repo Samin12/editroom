@@ -78,26 +78,51 @@ def overlap(a0, a1, spans):
     return sum(max(0.0, min(a1, e) - max(a0, b)) for b, e in spans)
 
 
-def video_pass(path, cam):
-    """Black frames, a frozen camera tile and long static frames, on one 480p proxy decode."""
+def video_pass(path, cam, dur=None, chunks=None):
+    """Black frames, a frozen camera tile, a frozen camera layout and long static frames, on 480p
+    proxy decodes. Long videos are split into overlapping chunks decoded in parallel."""
     x, y, w, h = cam
-    fc = ("[0:v]scale=480:-2,split=2[a][b];"
+    fc = ("[0:v]scale=480:-2,split=3[a][b1][b2];"
           "[a]blackdetect@whole=d=0.4:pix_th=0.06,freezedetect@whole=n=0.003:d=20[o1];"
-          f"[b]split=2[b1][b2];[b1]crop=iw*{w}:ih*{h}:iw*{x}:ih*{y},freezedetect@cam=n=0.002:d=2[o2];"
+          f"[b1]crop=iw*{w}:ih*{h}:iw*{x}:ih*{y},freezedetect@cam=n=0.002:d=2[o2];"
           "[b2]freezedetect@full=n=0.002:d=2[o3]")
-    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-hwaccel", "videotoolbox", "-i", path, "-an", "-filter_complex", fc,
-           "-map", "[o1]", "-f", "null", "-", "-map", "[o2]", "-f", "null", "-", "-map", "[o3]", "-f", "null", "-"]
-    code, out = run(cmd)
-    if code:  # no VideoToolbox: software decode
-        code, out = run([c for c in cmd if c not in ("-hwaccel", "videotoolbox")])
+    pad = 25.0  # overlap so a freeze or static stretch across a chunk edge is still seen whole
 
-    def freezes(tag):
-        st = [float(v) for v in re.findall(rf"freezedetect@{tag} @ \S+\] lavfi\.freezedetect\.freeze_start: ([\d.]+)", out)]
-        en = [float(v) for v in re.findall(rf"freezedetect@{tag} @ \S+\] lavfi\.freezedetect\.freeze_end: ([\d.]+)", out)]
-        return list(zip(st, en + [None] * (len(st) - len(en))))
+    def one(t0, t1):
+        rng = ["-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}"] if t1 else []
+        cmd = (["ffmpeg", "-hide_banner", "-nostats", "-hwaccel", "videotoolbox"] + rng + ["-i", path, "-an", "-filter_complex", fc,
+               "-map", "[o1]", "-f", "null", "-", "-map", "[o2]", "-f", "null", "-", "-map", "[o3]", "-f", "null", "-"])
+        code, out = run(cmd)
+        if code:  # no VideoToolbox: software decode
+            code, out = run([c for c in cmd if c not in ("-hwaccel", "videotoolbox")])
+        off = t0 if t1 else 0.0
 
-    black = [(float(a), float(b)) for a, b in re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", out)]
-    return {"black": black, "camera_freeze": freezes("cam"), "full_freeze": freezes("full"), "static": freezes("whole")}
+        def spans(tag):
+            st = [float(v) + off for v in re.findall(rf"freezedetect@{tag} @ \S+\] lavfi\.freezedetect\.freeze_start: ([\d.]+)", out)]
+            en = [float(v) + off for v in re.findall(rf"freezedetect@{tag} @ \S+\] lavfi\.freezedetect\.freeze_end: ([\d.]+)", out)]
+            return list(zip(st, en + [(t1 or None)] * (len(st) - len(en))))
+
+        black = [(float(a) + off, float(b) + off) for a, b in re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", out)]
+        return {"black": black, "camera_freeze": spans("cam"), "full_freeze": spans("full"), "static": spans("whole")}
+
+    n = chunks or max(1, min(8, int((dur or 0) // 180)))
+    if n == 1 or not dur:
+        return one(0.0, None)
+    step = dur / n
+    parts = [(max(0.0, i * step - (pad if i else 0)), min(dur, (i + 1) * step)) for i in range(n)]
+    with cf.ThreadPoolExecutor(n) as ex:
+        res = list(ex.map(lambda p: one(*p), parts))
+
+    def merge(spans):
+        out = []
+        for a, b in sorted(spans, key=lambda s: s[0]):
+            if out and a <= (out[-1][1] or a) + 0.05:
+                out[-1] = (out[-1][0], None if b is None or out[-1][1] is None else max(out[-1][1], b))
+            else:
+                out.append((a, b))
+        return out
+
+    return {k: merge([s for r in res for s in r[k]]) for k in ("black", "camera_freeze", "full_freeze", "static")}
 
 
 def audio_pass(path):
@@ -169,7 +194,7 @@ def main():
             add("major", f"no camera for {(g['end_ms'] - g['start_ms']) / 1000:.1f}s in the panel layout", g["start_ms"] / 1000,
                 "a gap in the camera clips: cut the stretch, or switch it to screen layout")
     with cf.ThreadPoolExecutor(2) as ex:
-        fv = ex.submit(video_pass, v, cam)
+        fv = ex.submit(video_pass, v, cam, dur)
         fa = ex.submit(audio_pass, v) if aus else None
         vr = fv.result()
         ar = fa.result() if fa else None

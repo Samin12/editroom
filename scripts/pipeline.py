@@ -338,7 +338,15 @@ def st_sheet(r, proj):
             txt = "; ".join(i if isinstance(i, str) else i.get("text", "") for i in b["items"])
         return f"{b.get('kind')}: {str(txt)[:90]}  ({b.get('origin', '')})"
 
-    marks = [((b["start_ms"] + b["end_ms"]) / 2, label(b)) for b in plan.get("beats", []) if b.get("kind") != "blur"]
+    def settled(b):
+        """Beats that build up (word-by-word titles, bullets, counters, scenes, typing code) are judged
+        once built: just before they end. Everything else at its midpoint."""
+        s0, s1 = b["start_ms"], b["end_ms"]
+        if b.get("kind") in ("scene", "bullets", "title", "number", "code", "quote"):
+            return s1 - min(700, 0.15 * (s1 - s0))
+        return (s0 + s1) / 2
+
+    marks = [(settled(b), label(b)) for b in plan.get("beats", []) if b.get("kind") != "blur"]
     marks += [((c["card"][0] + c["card"][1]) / 2, f"chapter card {c.get('n')}: {c.get('title')}")
               for c in plan.get("chapters", []) if c.get("card")]
     marks.sort()
