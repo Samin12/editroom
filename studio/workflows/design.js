@@ -90,6 +90,8 @@ Build the film, render it, run the mechanical checks, write design-report.json a
 const checkPrompt = (t, r, round) => `${CONTEXT}
 
 Read your role instructions first: "${ROLE('checker')}". Your verdict file: "${t.job_dir}/checks/check-v${r.version}.json".
+WRITE the verdict file (the same JSON you return, plus "key" and "version") BEFORE you return, then confirm it with
+\`python3 -c "import json;json.load(open('<file>'))"\`. A verdict that is only returned is lost on resume.
 ${slot(t)}
 ${t.mode === 'front' ? FRONT : ''}
 Render to check: "${r.render_path}" (version ${r.version}). Designer report:

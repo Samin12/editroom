@@ -112,6 +112,9 @@ Reply to Samin, short and speakable:
 ## Failure handling
 - A workflow returns `null` for an agent (it died): rerun the same `S args ...` + workflow; finished slots and
   verified groups are skipped (state is on disk: briefs, `design-report.json`, `checks/check-v<N>.json`).
+- `S status` shows a rendered version with check `-` although the workflow reported it passed: the checker returned its
+  verdict without writing `checks/check-v<N>.json`. Write that file from the workflow's journal result (the checker's
+  JSON plus `key` and `version`) instead of re-running the slot.
 - A stage fails twice the same way: stop and tell Samin what broke (an error, not a question).
 - `references/troubleshooting.md` covers the engine, the pipeline and gates; `references/studio.md` covers the
   studio files and commands in detail.
