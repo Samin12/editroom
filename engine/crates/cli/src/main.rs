@@ -68,6 +68,12 @@ enum Cmd {
         /// Values that may stay visible: an exact email/value, "@domain", or "/regex/" (repeatable).
         #[arg(long)]
         allow: Vec<String>,
+        /// Extra detector, `name=regex` (repeatable); found like the built-in kinds.
+        #[arg(long)]
+        pattern: Vec<String>,
+        /// Rules file (patterns, allow, skip). Default: privacy-rules.yaml in the work folder.
+        #[arg(long)]
+        rules: Option<PathBuf>,
     },
     /// Lint the edit: anchors, overlaps, empty panels, privacy, missing files.
     Check {
@@ -322,15 +328,24 @@ fn main() -> Result<()> {
             };
             print!("{}", resolve::brief(&p.src, if raw { None } else { Some(&p.plan) }, lo, hi, width));
         }
-        Cmd::Privacy { dir, every, allow } => {
+        Cmd::Privacy { dir, every, allow, pattern, rules } => {
             let t = Instant::now();
             let sp = spec_path(&dir);
             let loaded = spec::load(&sp)?;
             let src = Source::load(&loaded.source_path)?;
-            let mut opts = cutroom_privacy::ScanOpts { every_ms: every, ..Default::default() };
-            opts.allow.extend(allow);
-            let f = cutroom_privacy::scan(&src, &opts)?;
             let base = sp.parent().unwrap_or(Path::new("."));
+            let mut opts = cutroom_privacy::ScanOpts { every_ms: every, ..Default::default() };
+            let rules_path = rules.clone().unwrap_or_else(|| base.join("privacy-rules.yaml"));
+            if rules.is_some() || rules_path.exists() {
+                let r = cutroom_privacy::Rules::load(&rules_path)?;
+                println!("rules: {} ({} patterns, {} allowed, {} kinds skipped)", rules_path.display(), r.patterns.len(), r.allow.len(), r.skip.len());
+                r.apply(&mut opts);
+            }
+            opts.allow.extend(allow);
+            for p in &pattern {
+                opts.extra_patterns.push(cutroom_privacy::Pattern::parse(p)?);
+            }
+            let f = cutroom_privacy::scan(&src, &opts)?;
             cutroom_privacy::write_json(&base.join("privacy.json"), &f)?;
             std::fs::create_dir_all(base.join("beats"))?;
             std::fs::write(base.join("beats/privacy.yaml"), cutroom_privacy::propose_beats(&f))?;
