@@ -1,13 +1,18 @@
-# editroom privacy rules: copied into each work dir, read by `cutroom privacy` on top of its built-in
-# detectors (API keys, tokens, emails, phone and card numbers). Every hit becomes a blur beat, and
-# render refuses while any finding is visible unblurred.
+# editroom privacy rules: copied into each work dir; `cutroom privacy` reads <work>/privacy-rules.yaml
+# automatically, on top of its built-in detectors (API keys, tokens, passwords, emails, phone and
+# card numbers). Every hit is stored redacted, becomes a blur beat, and render refuses while any
+# finding is visible unblurred. Regexes are Rust syntax; a group named `v` (or group 1) is what
+# gets blurred, else the whole match. See engine/docs/PRIVACY.md.
 patterns:
   # Samin's paid community price: never on screen (show the community itself, not its price).
-  - {name: community-price, regex: '\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month|yr|year)\b'}
-  - {name: per-month-price, regex: '\$\s?\d+(?:\.\d{2})?\s+(?:per|a)\s+month\b'}
-  - {name: skool-about-page, regex: 'skool\.com/[\w-]+/about'}
+  - {name: community-price, regex: '(?i)\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month|yr|year)\b'}
+  - {name: per-month-price, regex: '(?i)\$\s?\d+(?:\.\d{2})?\s+(?:per|a)\s+month\b'}
+  - {name: skool-about-page, regex: '(?i)skool\.com/[\w-]+/about'}
   # Private identifiers that sometimes show in a browser or terminal.
-  - {name: order-number, regex: '\b(?:order|invoice)\s*#?\s*[A-Z0-9-]{6,}\b'}
+  - {name: order-number, regex: '(?i)\b(?:order|invoice)\s*(?:no\.?|number|#)?\s*:?\s*(?P<v>[A-Z0-9-]{6,})\b'}
   - {name: street-address, regex: '\b\d{2,5}\s+[A-Z][a-z]+\s+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Dr|Drive|Ln|Lane)\b'}
-# Values that may stay visible (exact value, "@domain", or "/regex/").
+# Values that may stay visible: exact text, "@domain" for a whole email domain, or "/regex/".
+# The pipeline's --allow adds to this list for one run.
 allow: []
+# Built-in kinds to leave out entirely (api_key, token, password, email, phone, card, ...).
+skip: []

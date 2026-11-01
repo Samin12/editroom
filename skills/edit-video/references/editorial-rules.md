@@ -49,6 +49,30 @@ was cut), every kept claim still has its proof, every kept visual still has its 
 **Accuracy is a cutting reason:** an overstated clause (license, price, "free") is best cut when the
 sentence stands without it; otherwise keep it and flag it.
 
+**Where cuts live: `W/cuts.yaml`.** One line per cut, inclusive word ranges:
+
+```yaml
+cuts:
+  - {from: w812, to: w830, why: retake}                         # the detector (regenerated on every run)
+  - {ms: [15621.6, 15701.6], why: silence}                      # machine silence cuts, exact source ms
+  # editorial cuts (cutroom agent; delete a line to undo it)
+  - {"by":"agent","from":"w336","note":"re-said cleanly at w346","to":"w345","why":"retake"}
+  # human cuts (kept when cuts are regenerated)
+  - {from: w2210, to: w2219, why: tangent, by: human}
+```
+
+Fields: `from`, `to` (inclusive; defaults to `from`), `ms` (exact source range), `why`, `by`
+(`agent`, `human`, or none for the detector), `note`. The agent writes its lines as compact JSON
+objects (valid YAML); yours can be either style. `cutroom agent` regenerates the detector's
+and its own cuts and keeps `by: human`; `cutroom cut` regenerates the detector's and keeps both.
+`W/review.md` lists every editorial cut with its time in the edited video and in the raw recording,
+the words removed, and why.
+
+**Undoing a cut** (the agent can occasionally cut something he meant to keep, like an instruction
+or an aside): delete its line from `cuts.yaml`, then rerun with `--from-stage check`. Do not rerun
+`analyze` afterwards: the agent regenerates its cuts. There is no keep list, and changing `by:`
+to another value does not restore the words. To force a cut, add a `by: human` line.
+
 **Verifying cuts:** whisper-of-the-output lies twice: it collapses real stutters (looks clean, isn't)
 and invents words at joins (looks dirty, isn't). Check suspect joins by transcribing each side
 separately; a second, different transcriber catches what the first missed.
