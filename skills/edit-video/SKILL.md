@@ -80,6 +80,9 @@ every chapter-card boundary; slots with blocking issues go back through `design.
   (a blur stays, a film beat with a wrong file gets re-wired), rerun with `--from-stage check`.
 
 ## 7. Final QA, Borumi, report
+- Privacy sweep (optional, needs a Jev or Sage key): `S jev-privacy "$W"` on the render. Look at
+  `W/studio/receipts/privacy-sweep/candidates.jpg`; copy each confirmed blur into `W/beats/review-privacy.yaml`
+  (re-anchor to `s:`), then re-render. It adds to the OCR regex; never skip the reviewers because of it.
 - `S args final-qa "$W"` -> `final-qa.js`: three read-only reviewers (cards and joins, narrative flow, a full
   watch-through against the proof pack and privacy rules). Fix every blocker and major through its owner:
   `design --only <KEY>` then `S wire`, a cut line in `cuts.yaml`, a blur beat, the chapters; then re-render with

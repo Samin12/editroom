@@ -11,6 +11,9 @@ You are an INDEPENDENT CHECKER. Assume the designer missed things. Never modify 
  "evidence": ["what you verified as OK"]}
 
 ## Start with the measurements (don't redo them by eye)
+- Optional pre-screen (BEHIND films; skips itself without a key): `python3 <studio_py> jev-frames <W> <KEY> --render
+  <render>`. Look at its `flagged` frames, then `unsure`, then `weakest` FIRST. It only orders your work: a frame it
+  didn't flag is not checked, so the full pass below still covers every beat.
 - `python3 <studio_py> check-render <W> <KEY> --render <render> --json`: frame count vs the slot, dips to black,
   static holds, content in the camera tile or badge area, alpha outside the panel, beat lead vs word timings. Every
   blocking finding there is blocking for you too.

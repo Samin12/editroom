@@ -10,6 +10,8 @@ only the receipt at the `out` path in your task and return the same JSON:
 {"issues": [{"key", "severity": "blocking"|"minor", "frames", "problem", "fix"}], "summary"}
 
 ## Look
+- Optional, to start with the weakest frames: `python3 <studio_py> polish <render> --every 3` per slot (a ranking,
+  never a pass; you still look at every sheet).
 1. A sheet per render in order: `python3 <studio_py> sheet-video <render> --every 3 -o /tmp/cont-<KEY>.png`. Look
    at all of them in sequence.
 2. Every join: for adjacent slots, the last frames of one and the first frames of the next (ffmpeg grabs at

@@ -1050,6 +1050,49 @@ def cmd_check_render(a):
     sys.exit(1 if res["blocking"] else 0)
 
 
+# ------------------------------------------------------------------------------ decision models (optional)
+# Jev / Sage pre-screens (tools/jev/studio_jev.py). Never a replacement for an agent's judgment: they flag,
+# rank and suggest; every unsure answer goes to the agent. Without a key they print {"skipped": ...}.
+
+def _jev():
+    sys.path.insert(0, os.path.join(ER, "tools", "jev"))
+    import studio_jev  # noqa: E402
+    return studio_jev
+
+
+def cmd_jev_privacy(a):
+    w = os.path.abspath(a.work)
+    video = a.video
+    if not video:
+        outs = sorted(glob.glob(os.path.join(w, "out", "*.mp4")), key=os.path.getmtime)
+        video = outs[-1] if outs else None
+    if not video:
+        die("no render to sweep: pass --video (the latest render of the edit)")
+    print(json.dumps(_jev().privacy(w, os.path.abspath(video), a.every), indent=1))
+
+
+def cmd_jev_frames(a):
+    w = os.path.abspath(a.work)
+    sec = jload(studio(w, "sections.json")) or {}
+    s = next((x for x in sec.get("slots", []) if x["key"] == a.key), None)
+    if not s:
+        die(f"no slot {a.key} in sections.json")
+    rep = jload(os.path.join(s["job_dir"], "design-report.json"), {}) or {}
+    render = a.render or rep.get("render_path")
+    if not render or not os.path.exists(render):
+        die(f"no render for {a.key} (pass --render)")
+    res = _jev().frames(w, a.key, render, rep.get("version"), a.every, s["job_dir"])
+    print(json.dumps({k: v for k, v in res.items() if k != "frames"}, indent=1))
+
+
+def cmd_polish(a):
+    print(json.dumps({k: v for k, v in _jev().polish(os.path.abspath(a.video), a.every).items() if k != "points"}, indent=1))
+
+
+def cmd_rank_crops(a):
+    print(json.dumps(_jev().rank_crops(a.claim, [os.path.abspath(p) for p in a.pngs]), indent=1))
+
+
 # ---------------------------------------------------------------------------------------------- log / report
 
 def cmd_log(a):
@@ -1127,10 +1170,19 @@ def main():
     p = sub.add_parser("log"); p.add_argument("work"); p.add_argument("stage"); p.add_argument("event", choices=["start", "end"])
     p.add_argument("--note")
     p = sub.add_parser("report"); p.add_argument("work")
+    p = sub.add_parser("jev-privacy", help="decision-model privacy sweep of a render -> candidates for a reviewer")
+    p.add_argument("work"); p.add_argument("--video"); p.add_argument("--every", type=float, default=1.0)
+    p = sub.add_parser("jev-frames", help="decision-model pre-screen of a section film -> frames the checker looks at first")
+    p.add_argument("work"); p.add_argument("key"); p.add_argument("--render"); p.add_argument("--every", type=float, default=1.0)
+    p = sub.add_parser("polish", help="polish score per sampled frame of a video -> weakest frames for reviewers")
+    p.add_argument("video"); p.add_argument("--every", type=float, default=4.0)
+    p = sub.add_parser("rank-crops", help="rank proof crops for one claim (a starting order for the brief writer)")
+    p.add_argument("--claim", required=True); p.add_argument("pngs", nargs="+")
     a = ap.parse_args()
     {"init": cmd_init, "resolve": cmd_resolve, "verify": cmd_verify, "status": cmd_status, "args": cmd_args,
      "wire": cmd_wire, "timing": cmd_timing, "boxes": cmd_boxes, "sheet-video": cmd_sheet_video,
-     "check-render": cmd_check_render, "log": cmd_log, "report": cmd_report}[a.cmd](a)
+     "check-render": cmd_check_render, "log": cmd_log, "report": cmd_report, "jev-privacy": cmd_jev_privacy,
+     "jev-frames": cmd_jev_frames, "polish": cmd_polish, "rank-crops": cmd_rank_crops}[a.cmd](a)
 
 
 if __name__ == "__main__":
