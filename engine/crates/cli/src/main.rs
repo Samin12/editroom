@@ -86,7 +86,13 @@ enum Cmd {
         verbose: bool,
     },
     /// Print the resolved plan (output times) as JSON.
-    Plan { dir: PathBuf },
+    Plan {
+        dir: PathBuf,
+        /// Add `segments`: stretches of constant layout with the camera and screen rects in
+        /// output pixels (what QA should look at).
+        #[arg(long)]
+        segments: bool,
+    },
     /// Render one frame to PNG.
     Still {
         dir: PathBuf,
@@ -413,9 +419,16 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Cmd::Plan { dir } => {
+        Cmd::Plan { dir, segments: with_segments } => {
             let p = open(&dir, None)?;
-            println!("{}", serde_json::to_string_pretty(&p.plan)?);
+            if with_segments {
+                let segs = segments(&p.plan, &p.src);
+                let mut v = serde_json::to_value(&p.plan)?;
+                v["segments"] = serde_json::to_value(cutroom_render::layout::layout_segments(&p.plan, &p.src, &segs))?;
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&p.plan)?);
+            }
         }
         Cmd::Still { dir, at, out } => {
             let p = open(&dir, None)?;

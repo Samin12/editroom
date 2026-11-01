@@ -44,6 +44,47 @@ pub struct Stats {
 const ZOOM_EASE_MS: f64 = 450.0;
 const MAX_SKIP_MS: f64 = 2500.0;
 
+/// What a segment puts where, in output pixels `[x, y, w, h]`. The compositor draws from this
+/// and `cutroom plan --segments` reports it, so the two cannot disagree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Visible {
+    /// A chapter card covers the whole frame (inserted, or drawn over the segment).
+    pub card: bool,
+    /// Where the screen recording is drawn (the panel slot, or the frame in screen layout).
+    pub screen: Option<[i32; 4]>,
+    /// Where the camera is drawn (the tile in panel layout, the frame in camera layout).
+    pub camera: Option<[i32; 4]>,
+}
+
+/// The panel slot and camera tile of `plan` in output pixels.
+pub fn slots(plan: &Plan) -> ([i32; 4], [i32; 4]) {
+    (px_rect(&plan.layout.panel, plan.width, plan.height), px_rect(&plan.layout.camera, plan.width, plan.height))
+}
+
+/// [`Visible`] for one segment. A stage beat replaces the screen (the camera tile stays); a card
+/// hides everything.
+pub fn visible(plan: &Plan, seg: &Seg) -> Visible {
+    let (panel, tile) = slots(plan);
+    let full = [0, 0, plan.width as i32, plan.height as i32];
+    if seg.card.is_some() {
+        return Visible { card: true, screen: None, camera: None };
+    }
+    let has_src = seg.src0.is_some();
+    let screen = match seg.mode {
+        _ if !has_src || seg.screen.is_none() || seg.stage.is_some() => None,
+        LayoutMode::Panel => Some(panel),
+        LayoutMode::Screen => Some(full),
+        LayoutMode::Camera => None,
+    };
+    let camera = match seg.mode {
+        _ if !has_src || seg.camera.is_none() => None,
+        LayoutMode::Panel => Some(tile),
+        LayoutMode::Camera => Some(full),
+        LayoutMode::Screen => None,
+    };
+    Visible { card: false, screen, camera }
+}
+
 fn px_rect(r: &RectN, w: u32, h: u32) -> [i32; 4] {
     let x = (r[0] * w as f64).round() as i32;
     let y = (r[1] * h as f64).round() as i32;
@@ -93,8 +134,7 @@ impl<'a> Compositor<'a> {
         let plan = ctx.plan;
         let (w, h) = (plan.width, plan.height);
         let gfx = Gfx::new(Theme::from_style(&plan.style), w, h, ctx.dir)?;
-        let panel = px_rect(&plan.layout.panel, w, h);
-        let tile = px_rect(&plan.layout.camera, w, h);
+        let (panel, tile) = slots(plan);
         let r = gfx.slot_radius();
         Ok(Compositor {
             panel_mask: RoundMask::new(panel[2] as u32, panel[3] as u32, r),
@@ -199,11 +239,13 @@ impl<'a> Compositor<'a> {
         let cam_clip: Option<&Clip> = seg.camera.map(|i| &src.clips[i]);
 
         // ---- the screen slot ----
-        let (slot, show_screen) = match seg.mode {
-            LayoutMode::Panel => (self.panel, stage.is_none() && screen_clip.is_some()),
-            LayoutMode::Screen => ([0, 0, self.w as i32, self.h as i32], screen_clip.is_some() && stage.is_none()),
-            LayoutMode::Camera => ([0, 0, 0, 0], false),
+        let vis = visible(plan, seg);
+        let slot = match seg.mode {
+            LayoutMode::Panel => self.panel,
+            LayoutMode::Screen => [0, 0, self.w as i32, self.h as i32],
+            LayoutMode::Camera => [0, 0, 0, 0],
         };
+        let show_screen = vis.screen.is_some();
         let mut map: Option<ScreenMap> = None;
         if seg.mode == LayoutMode::Panel && !full_frame_stage {
             self.gfx.slot_shadow(&mut self.pm, rect(self.panel), self.gfx.slot_radius());
@@ -315,12 +357,8 @@ impl<'a> Compositor<'a> {
             let media = src.media(&c.media).unwrap();
             let (cw, ch) = self.dims(&c.media);
             let m = c.media_at(s);
-            let (target, mask) = match seg.mode {
-                LayoutMode::Panel => (Some(self.tile), true),
-                LayoutMode::Camera => (Some([0, 0, self.w as i32, self.h as i32]), false),
-                LayoutMode::Screen => (None, false),
-            };
-            if let Some(tr) = target {
+            let mask = seg.mode == LayoutMode::Panel;
+            if let Some(tr) = vis.camera {
                 let region = if mask { plan.layout.camera_crop } else { None };
                 let geo = cover(cw, ch, region, tr[2] as u32, tr[3] as u32);
                 if mask {
