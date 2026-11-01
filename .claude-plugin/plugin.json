@@ -1,0 +1,19 @@
+{
+  "name": "editroom",
+  "version": "0.1.0",
+  "description": "Edit a raw recording (a Borumi project or camera + screen files) into a finished YouTube video in one go: cuts, chapters, proof screenshots, native motion graphics and custom animations, privacy blur, music, a 15x-realtime render and QA. Built on the cutroom Rust engine.",
+  "author": {
+    "name": "Samin Yasar",
+    "email": "samin@aianswer.us"
+  },
+  "repository": "https://github.com/Samin12/editroom",
+  "license": "MIT",
+  "keywords": [
+    "video-editing",
+    "borumi",
+    "youtube",
+    "cutroom",
+    "motion-graphics",
+    "rust"
+  ]
+}
