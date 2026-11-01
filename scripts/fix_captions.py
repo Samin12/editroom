@@ -27,11 +27,27 @@ def load_map(work):
     return m
 
 
+# between two words of a name: spaces, a line break, or a whole cue break ("\n\n12\n00:00:01,000 --> 00:00:02,000\n")
+SEP = r"(\s+(?:\d+\s*\n\d\d:\d\d:\d\d,\d{3} --> \d\d:\d\d:\d\d,\d{3}\s*\n)?)"
+
+
 def fix(text, names):
     counts = {}
     for wrong in sorted(names, key=len, reverse=True):
-        pat = re.compile(r"(?<![\w-])" + r"\s+".join(map(re.escape, wrong.split())) + r"(?![\w-])", re.I)
-        text, n = pat.subn(names[wrong], text)
+        ww, rw = wrong.split(), names[wrong].split()
+        pat = re.compile(r"(?<![\w-])" + SEP.join(f"({re.escape(x)})" for x in ww) + r"(?![\w-])", re.I)
+
+        def rep(m):
+            if len(ww) == 1:
+                return names[wrong]
+            seps = [m.group(2 * i + 2) for i in range(len(ww) - 1)]
+            if len(rw) == len(ww):  # word for word, so a name split over two cues stays split the same way
+                return "".join(rw[i] + (seps[i] if i < len(seps) else "") for i in range(len(rw)))
+            if all("-->" not in x for x in seps):
+                return names[wrong]
+            return m.group(0)  # different word count across a cue break: leave it
+
+        text, n = pat.subn(rep, text)
         if n:
             counts[f"{wrong} -> {names[wrong]}"] = n
     return text, counts
