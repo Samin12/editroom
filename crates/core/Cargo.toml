@@ -1,0 +1,15 @@
+[package]
+name = "cutroom-core"
+description = "Word-anchored edit model, time map and checks for cutroom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+serde_yaml.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "cutroom-render"
+description = "Parallel compositor and encoder for cutroom plans"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cutroom-core.workspace = true
+cutroom-gfx.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+rayon.workspace = true
+tiny-skia.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
