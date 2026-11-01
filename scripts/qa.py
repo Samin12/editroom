@@ -43,22 +43,39 @@ def probe(path):
 CAMERA = [0.7966, 0.2126, 0.1843, 0.5747]  # cutroom's default camera tile; the plan overrides it
 
 
-def camera_rect(work):
-    """The camera tile from `cutroom plan` (layout.camera), or the default."""
+def layout(work):
+    """(camera tile, segments) from `cutroom plan --segments`: the tile normalized to the frame, and
+    every stretch's mode and camera rect in output pixels. Falls back to the default tile and no
+    segments with an old engine."""
     home = os.path.expanduser(os.environ.get("EDITROOM_HOME", "~/.editroom"))
     for c in [os.environ.get("CUTROOM"), os.path.join(home, "bin", "cutroom"), "cutroom"]:
         if not c:
             continue
-        try:
-            code, out = run([c, "plan", work])
-        except OSError:
-            continue
-        if code == 0:
+        for args in ([c, "plan", work, "--segments"], [c, "plan", work]):
             try:
-                return json.loads(out[out.index("{"):])["layout"]["camera"] or CAMERA
-            except (ValueError, KeyError, TypeError):
+                code, out = run(args)
+            except OSError:
                 break
-    return CAMERA
+            if code:
+                continue
+            try:
+                p = json.loads(out[out.index("{"):])
+            except ValueError:
+                break
+            segs = p.get("segments") or []
+            tile = p.get("layout", {}).get("camera") or CAMERA
+            fw, fh = p.get("width") or 1920, p.get("height") or 1080
+            panel = [sg["camera_rect"] for sg in segs if sg.get("mode") == "panel" and sg.get("camera_rect")]
+            if panel:  # the tile the renderer actually drew most
+                r = max(set(map(tuple, panel)), key=panel.count)
+                tile = [r[0] / fw, r[1] / fh, r[2] / fw, r[3] / fh]
+            return tile, segs, (fw, fh)
+    return CAMERA, [], (1920, 1080)
+
+
+def overlap(a0, a1, spans):
+    """Seconds of [a0, a1] inside the (start_s, end_s) spans."""
+    return sum(max(0.0, min(a1, e) - max(a0, b)) for b, e in spans)
 
 
 def video_pass(path, cam):
@@ -66,9 +83,10 @@ def video_pass(path, cam):
     x, y, w, h = cam
     fc = ("[0:v]scale=480:-2,split=2[a][b];"
           "[a]blackdetect@whole=d=0.4:pix_th=0.06,freezedetect@whole=n=0.003:d=20[o1];"
-          f"[b]crop=iw*{w}:ih*{h}:iw*{x}:ih*{y},freezedetect@cam=n=0.002:d=2[o2]")
+          f"[b]split=2[b1][b2];[b1]crop=iw*{w}:ih*{h}:iw*{x}:ih*{y},freezedetect@cam=n=0.002:d=2[o2];"
+          "[b2]freezedetect@full=n=0.002:d=2[o3]")
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-hwaccel", "videotoolbox", "-i", path, "-an", "-filter_complex", fc,
-           "-map", "[o1]", "-f", "null", "-", "-map", "[o2]", "-f", "null", "-"]
+           "-map", "[o1]", "-f", "null", "-", "-map", "[o2]", "-f", "null", "-", "-map", "[o3]", "-f", "null", "-"]
     code, out = run(cmd)
     if code:  # no VideoToolbox: software decode
         code, out = run([c for c in cmd if c not in ("-hwaccel", "videotoolbox")])
@@ -79,7 +97,7 @@ def video_pass(path, cam):
         return list(zip(st, en + [None] * (len(st) - len(en))))
 
     black = [(float(a), float(b)) for a, b in re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", out)]
-    return {"black": black, "camera_freeze": freezes("cam"), "static": freezes("whole")}
+    return {"black": black, "camera_freeze": freezes("cam"), "full_freeze": freezes("full"), "static": freezes("whole")}
 
 
 def audio_pass(path):
@@ -139,7 +157,17 @@ def main():
         if rep.get("output_s") and abs(rep["output_s"] - dur) > 0.5:
             add("blocker", f"duration {dur:.2f}s differs from the plan {rep['output_s']:.2f}s", fix="re-render; check render.log for a failed chunk")
 
-    cam = camera_rect(work)
+    cam, segs, (fw, fh) = layout(work)
+    tile_px = [round(cam[0] * fw), round(cam[1] * fh), round(cam[2] * fw), round(cam[3] * fh)]
+    # where each check applies: the tile while the tile is on screen, the whole frame in camera layout
+    tile_on = [(g["start_ms"] / 1000, g["end_ms"] / 1000) for g in segs
+               if g.get("camera_rect") and g.get("mode") != "camera"
+               and all(abs(a - b) <= 2 for a, b in zip(g["camera_rect"], tile_px))]
+    cam_full = [(g["start_ms"] / 1000, g["end_ms"] / 1000) for g in segs if g.get("mode") == "camera"]
+    for g in segs:
+        if g.get("mode") == "panel" and not g.get("camera_rect") and g["end_ms"] - g["start_ms"] >= 500:
+            add("major", f"no camera for {(g['end_ms'] - g['start_ms']) / 1000:.1f}s in the panel layout", g["start_ms"] / 1000,
+                "a gap in the camera clips: cut the stretch, or switch it to screen layout")
     with cf.ThreadPoolExecutor(2) as ex:
         fv = ex.submit(video_pass, v, cam)
         fa = ex.submit(audio_pass, v) if aus else None
@@ -149,10 +177,14 @@ def main():
     for b0, b1 in vr["black"]:
         if b1 - b0 >= 0.4:
             add("major", f"black for {b1 - b0:.1f}s", b0, "a missing clip or a cut landing on an empty frame: look at a still there")
-    for f0, f1 in vr["camera_freeze"]:
-        length = (f1 or dur) - f0
-        add("major", f"camera tile frozen for {length:.1f}s", f0,
-            "a stalled or missing camera clip, or a still held over the camera: look at a still there")
+    freezes = [(f0, f1 or dur, "camera tile", tile_on) for f0, f1 in vr["camera_freeze"]]
+    freezes += [(f0, f1 or dur, "camera (full frame)", cam_full) for f0, f1 in vr["full_freeze"]] if segs else []
+    for f0, f1, where, spans in freezes:
+        # without segments (old engine) every tile freeze counts; with them only where that view is on screen
+        length = overlap(f0, f1, spans) if segs else f1 - f0
+        if length >= 2.0:
+            add("major", f"{where} frozen for {length:.1f}s", f0,
+                "a stalled or missing camera clip, or a still held over the camera: look at a still there")
     for f0, f1 in vr["static"]:
         length = (f1 or dur) - f0
         add("minor", f"whole frame unchanged for {length:.0f}s", f0,
