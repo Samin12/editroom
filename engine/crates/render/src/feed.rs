@@ -222,6 +222,30 @@ pub fn pix_fmt_has_alpha(pix: &str) -> bool {
     p.starts_with("yuva") || p.starts_with("gbrap") || p.starts_with("ya") || ["rgba", "bgra", "argb", "abgr", "rgba64", "bgra64"].iter().any(|f| p.starts_with(f))
 }
 
+/// ffprobe: the number of frames of the first video stream (`nb_frames`, or counted packets when
+/// the container does not say), its frame rate and duration (ms).
+pub fn probe_frames(path: &Path) -> Result<(u64, f64, f64)> {
+    let (_, _, fps, dur) = probe(path)?;
+    let o = Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=nb_frames", "-of", "default=nw=1:nk=1"])
+        .arg(path)
+        .output()
+        .context("running ffprobe")?;
+    let n = String::from_utf8_lossy(&o.stdout).trim().parse::<u64>().ok();
+    let n = match n {
+        Some(n) if n > 0 => n,
+        _ => {
+            let o = Command::new("ffprobe")
+                .args(["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "default=nw=1:nk=1"])
+                .arg(path)
+                .output()
+                .context("running ffprobe")?;
+            String::from_utf8_lossy(&o.stdout).trim().parse::<u64>().unwrap_or((dur * fps / 1000.0).round() as u64)
+        }
+    };
+    Ok((n, fps, dur))
+}
+
 /// ffprobe: (width, height, fps, duration ms) of the first video stream.
 pub fn probe(path: &Path) -> Result<(u32, u32, f64, f64)> {
     let o = Command::new("ffprobe")

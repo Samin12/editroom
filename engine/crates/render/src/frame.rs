@@ -133,7 +133,9 @@ impl<'a> Compositor<'a> {
     pub fn new(ctx: &'a Ctx<'a>) -> Result<Compositor<'a>> {
         let plan = ctx.plan;
         let (w, h) = (plan.width, plan.height);
-        let gfx = Gfx::new(Theme::from_style(&plan.style), w, h, ctx.dir)?;
+        let mut theme = Theme::from_style(&plan.style);
+        theme.card_style = plan.output.card_style;
+        let gfx = Gfx::new(theme, w, h, ctx.dir)?;
         let (panel, tile) = slots(plan);
         let r = gfx.slot_radius();
         Ok(Compositor {
@@ -374,11 +376,12 @@ impl<'a> Compositor<'a> {
 
         // ---- badge ----
         if plan.output.badge && seg.mode == LayoutMode::Panel {
-            if let Some(ch) = plan.chapter_at(t) {
+            // with chapter groups, the intro (before chapter 1) gets an "INTRO" badge too
+            let intro = intro_badge(plan);
+            if let Some(ch) = plan.chapter_at(t).or(intro.as_ref()) {
                 // card badge (step, title, progress) filling the space above the camera tile
-                let gap = (self.h as f32 * 0.02).round();
-                let bh = (self.tile[1] as f32 - gap - self.h as f32 * 0.065).clamp(self.h as f32 * 0.05, self.h as f32 * 0.13).round();
-                let r = Rect::from_xywh(self.tile[0] as f32, self.tile[1] as f32 - bh - gap, self.tile[2] as f32, bh).unwrap();
+                let r = badge_rect(self.tile, self.h);
+                let r = Rect::from_xywh(r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32).unwrap();
                 self.gfx.badge(&mut self.pm, r, ch, plan.chapters.len(), t);
             }
         }
@@ -455,7 +458,7 @@ struct Play {
 impl<'a> Compositor<'a> {
     /// The clip, timing and blend of video beat `b` at `t` (None for other kinds).
     fn play(&self, b: &ResolvedBeat, t: f64) -> Option<Play> {
-        let BeatKind::Video { src: file, from, fit, alpha, looped, .. } = &b.kind else { return None };
+        let BeatKind::Video { src: file, from, fit, alpha, looped, fade, .. } = &b.kind else { return None };
         let path = self.ctx.dir.join(file);
         let key = path.display().to_string();
         let info = self.ctx.clips.get(&key).copied().unwrap_or_default();
@@ -464,11 +467,17 @@ impl<'a> Compositor<'a> {
         let frame_ms = 1000.0 / self.ctx.plan.fps;
         let seek_ms = match (looped, info.dur_ms > 0.0) {
             (true, true) => media_ms.rem_euclid(info.dur_ms),
-            // past the end: decode the last frames and hold them
-            (false, true) => media_ms.min((info.dur_ms - 2.0 * frame_ms).max(0.0)),
+            // past the end: decode the last frame and hold it
+            (false, true) if media_ms > info.dur_ms - frame_ms * 0.5 => (info.dur_ms - frame_ms).max(0.0),
             _ => media_ms,
         };
-        let opacity = if *fit == VideoFit::Card { 1.0 } else { ((t - b.start_ms).min(b.end_ms - t) / CLIP_FADE_MS).clamp(0.0, 1.0) as f32 };
+        // Seek a quarter frame early: ffmpeg keeps the first frame at or after the seek point,
+        // and `-ss` is printed to 0.1 ms, so seeking exactly onto a frame can round past it and
+        // drop it. A quarter frame early always lands on the intended frame (the fps filter
+        // rounds the quarter-frame offset away), which keeps films frame-exact across chunks.
+        let seek_ms = (seek_ms - frame_ms * 0.25).max(0.0);
+        let fades = *fit != VideoFit::Card && fade.unwrap_or(true);
+        let opacity = if fades { ((t - b.start_ms).min(b.end_ms - t) / CLIP_FADE_MS).clamp(0.0, 1.0) as f32 } else { 1.0 };
         Some(Play { path, key, alpha: alpha.unwrap_or(info.alpha), looped, media_ms, seek_ms, remaining_ms: b.end_ms - t, opacity })
     }
 
@@ -521,6 +530,29 @@ impl<'a> Compositor<'a> {
         }
         Ok(dec)
     }
+}
+
+/// The badge rect (output px) above the camera tile `tile`, in a frame `h` px tall.
+pub fn badge_rect(tile: [i32; 4], h: u32) -> [i32; 4] {
+    let gap = (h as f32 * 0.02).round();
+    let bh = (tile[1] as f32 - gap - h as f32 * 0.065).clamp(h as f32 * 0.05, h as f32 * 0.13).round();
+    [tile[0], (tile[1] as f32 - bh - gap) as i32, tile[2], bh as i32]
+}
+
+/// The badge shown before the first chapter when chapters have groups: "INTRO" over
+/// `output.intro`, no group filled yet.
+pub fn intro_badge(plan: &Plan) -> Option<cutroom_core::resolve::ResolvedChapter> {
+    let first = plan.chapters.first()?;
+    let of = first.group.as_ref()?.of;
+    Some(cutroom_core::resolve::ResolvedChapter {
+        n: 0,
+        title: plan.output.intro.clone(),
+        short: plan.output.intro.clone(),
+        at_ms: 0.0,
+        card: None,
+        kicker: "Intro".into(),
+        group: Some(cutroom_core::resolve::GroupInfo { title: plan.output.intro.clone(), n: 0, of, first: 0, last: 0, card: false }),
+    })
 }
 
 fn rect(r: [i32; 4]) -> Rect {
