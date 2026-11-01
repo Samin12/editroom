@@ -466,7 +466,7 @@ RUN = {"ingest": st_ingest, "setup": st_setup, "analyze": st_analyze, "proofs": 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("project", nargs="?", help="Borumi project name or .bmprojbundle path")
+    ap.add_argument("project", nargs="?", help="Borumi project name or .bmprojbundle path (optional with --work on a started edit)")
     ap.add_argument("--files", action="store_true", help="plain files instead of a Borumi project")
     ap.add_argument("--camera"); ap.add_argument("--screen"); ap.add_argument("--mic"); ap.add_argument("--transcript")
     ap.add_argument("--name", help="video name (default: the project name)")
@@ -493,7 +493,11 @@ def main():
     if a.render_args and "--force" in a.render_args:
         sys.exit("editroom never renders with --force: fix what check reports instead")
 
-    proj = resolve_project(a)
+    saved = os.path.join(os.path.abspath(os.path.expanduser(a.work)), "editroom-state.json") if a.work else ""
+    if not a.project and not a.files and saved and os.path.exists(saved):
+        proj = json.load(open(saved)).get("project") or resolve_project(a)  # resume a work dir by path alone
+    else:
+        proj = resolve_project(a)
     r = Run(a)
     r.work = os.path.abspath(os.path.expanduser(a.work or proj["work_default"]))
     print(f"editroom: {proj['name']} -> {r.work}")
