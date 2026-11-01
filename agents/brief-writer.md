@@ -23,6 +23,8 @@ designer's job mechanical.
    exist (shared look, shared components, the hand-off at the join).
 
 ## Measure with tools, never by eye
+- Several captures for one claim: `python3 <studio_py> rank-crops --claim "<his words>" a.png b.png ...` gives a
+  starting order (optional); you still pick the crop that shows his exact words.
 - Glyph boxes of a phrase in a proof PNG: `python3 <studio_py> boxes <png> --phrase "<exact words>" --json` (it
   uses `cutroom boxes` when the engine has it). Multi-line phrases come back as one segment per line. If OCR can't
   find it, crop and look, and say "measured by hand" in OPEN ISSUES.

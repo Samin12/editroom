@@ -1,5 +1,12 @@
 # Studio mode: files, commands, resuming
 
+> **The rule (Samin, Nov 1): never compromise how the edits look and feel; optimize speed and cost.**
+> Decision models (TypeSafe Jev, Levanto Sage) only pre-screen, rank and suggest. They never remove a check:
+> the checker's full pass, the proof verifiers and the Opus editorial pass all stay. A model replaces a judgment
+> only if it matches or beats it on labelled data with recall at least as high, reported as a proposal, never as a
+> default. Unsure answers (null, low confidence, an error) always go to the agent; nothing is auto-passed.
+> Measurements: `tools/jev/BENCHMARKS.md`.
+
 ## Work dir (W = `~/Borumi Projects/<name> editroom/`)
 | Path | Written by | What |
 |---|---|---|
@@ -33,6 +40,10 @@
 | `sheet-video <video> --every S` or `--at t1,..` | a contact sheet (alpha shown over the canvas) + a frame list |
 | `check-render <W> <KEY> [--render P]` | mechanical checks: frame count, dips to black, static holds over 6 s, anything inside the camera tile or badge area (BEHIND), alpha outside the panel and coverage (FRONT), beat lead vs word frames |
 | `log <W> <stage> start|end` / `report <W>` | the timing log / a markdown summary for the report |
+| `jev-privacy <W> [--video P] [--every S]` | decision-model privacy sweep of a render (Jev, Sage fallback): candidate stretches with boxes, `studio/receipts/privacy-sweep/candidates.jpg`, suggested blur beats in `studio/receipts/privacy-candidates.json` (never in `beats/`) |
+| `jev-frames <W> <KEY> [--render P]` | decision-model pre-screen of a BEHIND film: `flagged` (clipped/overlap/empty/too small), `unsure`, `weakest` (polish) -> `checks/jev-frames-v<N>.json` |
+| `polish <video> [--every S]` | polish score per sampled frame, weakest first (a ranking for reviewers, never a gate) |
+| `rank-crops --claim "..." a.png b.png ...` | a starting order among captures for one claim |
 
 ## Staleness (why a stage reruns)
 Every slot has a signature (slot0, frames, its words' frames, mode). Issuing a brief or a design task records the
@@ -48,3 +59,14 @@ become STALE, `args briefs`/`args design` re-issue them, and `wire` refuses the 
 - Known engine gap (until the helpers branch lands): in a stretch with NO screen recording (talking head only,
   e.g. a hook), cutroom switches to the full-frame camera layout and the camera covers a BEHIND film. Check one
   still inside every such slot after wiring (`cutroom still W --at o:<s>`).
+
+## Decision models: where they plug in (all optional, all additive)
+- **Checker** (each round): `jev-frames` first; open its `flagged`, then `unsure`, then `weakest` frames FIRST, then do
+  the full 13-point pass on every beat as before. A clean pre-screen is never a pass.
+- **Continuity / final QA**: `polish <render>` to start with the weakest frames; every reviewer still watches it all.
+- **Privacy, after the first full render**: `jev-privacy W`. Look at `candidates.jpg`; for each real detail copy its
+  suggested blur into `beats/review-privacy.yaml` (re-anchor to `s:` source time), then re-render. It adds to the OCR
+  regex (it caught a URL with ids, a partial email and a bank name the regex missed); it replaces nothing.
+- **Brief writer**: `rank-crops` when a claim has several captures; the writer still picks the one with his exact words.
+- **Not used** (benchmarked, not good enough): proof verification (Jev flags everything, Sage misses weaker claims),
+  highlight boxes (Jev's box is too loose; `boxes` stays), retake judgment (below the Opus pass's recall).
