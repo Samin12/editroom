@@ -1,13 +1,17 @@
 {
  "id": "anim-mvagv60a",
- "title": null,
- "mode": null,
+ "title": "The hook",
+ "mode": "behind",
  "style": "velour",
  "background": "solid",
  "fps": 30,
  "width": 1920,
  "height": 1080,
  "durationInFrames": 1632,
- "startMs": null,
- "endMs": 54370
+ "startMs": 0,
+ "endMs": 54370,
+ "endMsEffective": 54400,
+ "userBrief": "THE HOOK (0:00.0 to 0:54.4), BEHIND, scene ffbb, project 0-54370 ms.",
+ "lastRenderedVersion": 2,
+ "projectName": "honcho"
 }

@@ -1,13 +1,17 @@
 {
  "id": "anim-mvas6eqq",
- "title": null,
- "mode": null,
+ "title": "Agent Handoffs",
+ "mode": "behind",
  "style": "velour",
  "background": "solid",
  "fps": 30,
  "width": 1920,
  "height": 1080,
  "durationInFrames": 1816,
- "startMs": null,
- "endMs": 309021
+ "startMs": 248520,
+ "endMs": 309021,
+ "endMsEffective": 309053,
+ "userBrief": "TIP 4 Agent Handoffs (BEHIND, project 248520-309021 ms)",
+ "lastRenderedVersion": 2,
+ "projectName": "tips"
 }

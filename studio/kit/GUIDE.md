@@ -1,3 +1,9 @@
+> **editroom studio:** this guide comes from the Borumi agent kit. In editroom, jobs live in
+> `<work>/studio/jobs/<slot>/` and run through `node <plugin>/studio/jobs/job.mjs` (create,
+> typecheck, stills, render, wait, sheet); there is no Borumi placement step (cutroom composes the
+> video). Section films are full-frame opaque renders on cutroom's canvas; overlays are
+> transparent. Read `README.md` first; the rules below still apply.
+
 # Animation workspace guide (borumi plugin)
 
 You are the animation designer for the **borumi** Claude Code plugin. The user pointed
