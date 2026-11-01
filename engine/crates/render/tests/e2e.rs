@@ -155,3 +155,58 @@ fn renders_synthetic_edit() {
     assert!(ch.starts_with("0:00 "), "{ch}");
     assert!(cutroom_render::outputs::srt(&plan).contains("-->"));
 }
+
+const EDIT_SCENES: &str = r#"
+source: source.json
+output: {height: 720, fps: 30, chapter_cards: off}
+beats:
+  - at: "first open the board"
+    hold: 3s
+    kind: scene
+    place: frame
+    layers:
+      - {type: box, x: 0.1, y: 0.3, w: 0.3, h: 0.3, fill: accent, shadow: false}
+      - {type: box, x: 0.7, y: 0.3, w: 0.29, h: 0.4, fill: green, shadow: false}
+      - {type: text, text: "Full frame", x: 0.1, y: 0.1, size: 80}
+  - at: "now the board"
+    hold: 3s
+    kind: scene
+    layers:
+      - {type: circle, x: 0.5, y: 0.5, r: 0.2, fill: green, shadow: false}
+"#;
+
+#[test]
+fn composes_scene_beats() {
+    let dir = std::env::temp_dir().join("cutroom-e2e-scene");
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = fixture(&dir);
+    src.save(&dir.join("source.json")).unwrap();
+    std::fs::write(dir.join("edit.yaml"), EDIT_SCENES).unwrap();
+    let plan = build(&spec::load(&dir.join("edit.yaml")).unwrap(), &src);
+    assert_eq!(plan.errors(), 0, "{:?}", plan.issues);
+    let segs = segments(&plan, &src);
+    let rgb = |p: &tiny_skia::Pixmap, x: u32, y: u32| {
+        let c = p.pixel(x, y).unwrap();
+        [c.red() as i32, c.green() as i32, c.blue() as i32]
+    };
+    let near = |a: [i32; 3], b: [i32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() <= 12);
+    let (accent, green) = ([0xE2, 0x77, 0x4E], [0x46, 0xB4, 0x82]);
+
+    // place: frame, while the screen recording is on: the scene covers the frame (no white
+    // screen in the panel), and the camera tile stays on top of the layer that runs under it
+    let full = plan.beats.iter().find(|b| b.kind.full_frame()).unwrap();
+    let pm = cutroom_render::still(&plan, &src, &segs, &dir, full.start_ms + 1800.0).unwrap();
+    assert!(near(rgb(&pm, 320, 324), accent), "box at frame (0.25, 0.45): {:?}", rgb(&pm, 320, 324));
+    let open = rgb(&pm, 900, 600);
+    assert!(open.iter().sum::<i32>() < 150, "no screen recording under a frame scene: {open:?}");
+    let tile = rgb(&pm, 1138, 360);
+    assert!(!near(tile, green), "the camera tile draws over frame scenes: {tile:?}");
+    assert!(near(rgb(&pm, 925, 400), green), "the layer shows left of the tile");
+
+    // place: stage: drawn in the panel over its surface, screen hidden
+    let stage = plan.beats.iter().find(|b| b.kind.name() == "scene" && !b.kind.full_frame()).unwrap();
+    let pm = cutroom_render::still(&plan, &src, &segs, &dir, stage.start_ms + 2000.0).unwrap();
+    assert!(near(rgb(&pm, 504, 360), green), "circle in the panel centre: {:?}", rgb(&pm, 504, 360));
+    let corner = rgb(&pm, 100, 650);
+    assert!(corner.iter().sum::<i32>() < 150, "panel surface, not the white screen: {corner:?}");
+}

@@ -1,5 +1,5 @@
 //! Stage beats: templates that fill the panel (title, bullets, number, image, video, code,
-//! quote). Each beat is laid out once (cached by content) in panel space, then every frame only
+//! quote). `scene` beats are drawn by [`crate::scene`]. Each beat is laid out once (cached by content) in panel space, then every frame only
 //! composites cached sprites with the motion grammar applied.
 
 use crate::anim::{back_out, ease_in_out, ease_out, geo_zoom, lerp, prog, Clock};
@@ -115,6 +115,10 @@ pub(crate) struct QuoteL {
 }
 
 pub(crate) fn draw(g: &Gfx, pm: &mut Pixmap, panel: Rect, beat: &ResolvedBeat, t_ms: f64, media: Option<&Pixmap>) {
+    if let BeatKind::Scene { .. } = &beat.kind {
+        crate::scene::draw(g, pm, panel, beat, t_ms);
+        return;
+    }
     let geo = Geo::new(panel);
     let clip = IRect::round(panel).intersect(IRect::of(pm));
     if clip.is_empty() {
@@ -140,14 +144,14 @@ pub(crate) fn draw(g: &Gfx, pm: &mut Pixmap, panel: Rect, beat: &ResolvedBeat, t
     }
 }
 
-fn layout_key(beat: &ResolvedBeat, geo: &Geo) -> u64 {
+pub(crate) fn layout_key(beat: &ResolvedBeat, geo: &Geo) -> u64 {
     let words: Vec<(&str, u64)> = beat.words.iter().map(|w| (w.text.as_str(), w.start_ms.to_bits())).collect();
     let items: Vec<u64> = beat.items_ms.iter().map(|v| v.to_bits()).collect();
     hash_of(&(format!("{:?}", beat.kind), beat.start_ms.to_bits(), beat.end_ms.to_bits(), items, words, [geo.w.to_bits(), geo.h.to_bits()]))
 }
 
 /// The raised panel surface plus its own slower dot grid (parallax against the canvas).
-fn draw_surface(g: &Gfx, pm: &mut Pixmap, geo: &Geo, clip: IRect, pal: &Pal, t_ms: f64) {
+pub(crate) fn draw_surface(g: &Gfx, pm: &mut Pixmap, geo: &Geo, clip: IRect, pal: &Pal, t_ms: f64) {
     let r = g.slot_radius();
     let (x, y) = (geo.x.round(), geo.y.round());
     let (w, h) = ((geo.x + geo.w).round() - x, (geo.y + geo.h).round() - y);
@@ -386,7 +390,7 @@ fn build_media(g: &Gfx, geo: &Geo, src: Option<&String>, caption: Option<&str>, 
     MediaL { card, radius: 28.0 * u, src, found, highlight, caption, source, missing }
 }
 
-fn wrap_code(text: &str, cols: usize) -> Vec<String> {
+pub(crate) fn wrap_code(text: &str, cols: usize) -> Vec<String> {
     let cols = cols.max(8);
     let mut out = vec![];
     for raw in text.replace('\t', "    ").lines() {
@@ -424,7 +428,7 @@ fn wrap_code(text: &str, cols: usize) -> Vec<String> {
     out
 }
 
-fn code_segs(line: &str) -> Vec<(usize, String, u8)> {
+pub(crate) fn code_segs(line: &str) -> Vec<(usize, String, u8)> {
     let t = line.trim_start();
     let lead = line.chars().count() - t.chars().count();
     if t.starts_with('#') || t.starts_with("//") || t.starts_with("--") {

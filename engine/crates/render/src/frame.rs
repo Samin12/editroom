@@ -173,6 +173,8 @@ impl<'a> Compositor<'a> {
             return Ok(());
         }
         let stage = seg.stage.map(|i| &plan.beats[i]);
+        // ---- scene beats with `place: frame`: drawn over the whole frame, no panel slot ----
+        let full_frame_stage = stage.is_some_and(|b| b.kind.full_frame());
         let screen_clip: Option<&Clip> = seg.screen.map(|i| &src.clips[i]);
         let cam_clip: Option<&Clip> = seg.camera.map(|i| &src.clips[i]);
 
@@ -183,7 +185,7 @@ impl<'a> Compositor<'a> {
             LayoutMode::Camera => ([0, 0, 0, 0], false),
         };
         let mut map: Option<ScreenMap> = None;
-        if seg.mode == LayoutMode::Panel {
+        if seg.mode == LayoutMode::Panel && !full_frame_stage {
             self.gfx.slot_shadow(&mut self.pm, rect(self.panel), self.gfx.slot_radius());
         }
         if let (true, Some(c), Some(s)) = (show_screen, screen_clip, s) {
@@ -262,7 +264,7 @@ impl<'a> Compositor<'a> {
 
         // ---- stage beat in the panel ----
         if let (Some(b), LayoutMode::Panel | LayoutMode::Screen) = (stage, seg.mode) {
-            let panel = if seg.mode == LayoutMode::Panel { rect(self.panel) } else { rect([0, 0, self.w as i32, self.h as i32]) };
+            let panel = if seg.mode == LayoutMode::Panel && !full_frame_stage { rect(self.panel) } else { rect([0, 0, self.w as i32, self.h as i32]) };
             let mut media: Option<Pixmap> = None;
             if let BeatKind::Video { src: file, from, .. } = &b.kind {
                 let path = self.ctx.dir.join(file);
