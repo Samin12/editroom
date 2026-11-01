@@ -1,0 +1,23 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "editroom",
+  "description": "Samin Yasar's video editor plugin: say \"get this edited\" and a raw recording comes back as a finished video.",
+  "owner": {
+    "name": "Samin Yasar",
+    "email": "samin@aianswer.us"
+  },
+  "plugins": [
+    {
+      "name": "editroom",
+      "source": "./",
+      "description": "Edit a raw recording into a finished YouTube video: cuts, chapters, proof, motion graphics, privacy, render and QA, on the cutroom Rust engine.",
+      "author": {
+        "name": "Samin Yasar",
+        "email": "samin@aianswer.us"
+      },
+      "repository": "https://github.com/Samin12/editroom",
+      "license": "MIT",
+      "keywords": ["video-editing", "borumi", "youtube", "cutroom"]
+    }
+  ]
+}

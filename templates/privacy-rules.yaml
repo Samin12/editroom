@@ -1,0 +1,13 @@
+# editroom privacy rules: copied into each work dir, read by `cutroom privacy` on top of its built-in
+# detectors (API keys, tokens, emails, phone and card numbers). Every hit becomes a blur beat, and
+# render refuses while any finding is visible unblurred.
+patterns:
+  # Samin's paid community price: never on screen (show the community itself, not its price).
+  - {name: community-price, regex: '\$\s?\d+(?:\.\d{2})?\s*/\s*(?:mo|month|yr|year)\b'}
+  - {name: per-month-price, regex: '\$\s?\d+(?:\.\d{2})?\s+(?:per|a)\s+month\b'}
+  - {name: skool-about-page, regex: 'skool\.com/[\w-]+/about'}
+  # Private identifiers that sometimes show in a browser or terminal.
+  - {name: order-number, regex: '\b(?:order|invoice)\s*#?\s*[A-Z0-9-]{6,}\b'}
+  - {name: street-address, regex: '\b\d{2,5}\s+[A-Z][a-z]+\s+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Dr|Drive|Ln|Lane)\b'}
+# Values that may stay visible (exact value, "@domain", or "/regex/").
+allow: []
