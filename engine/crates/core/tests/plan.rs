@@ -138,3 +138,18 @@ fn bad_scene_layers_fail_to_load() {
     let e = spec::load(&p).unwrap_err().to_string();
     assert!(e.contains("colour"), "{e}");
 }
+
+#[test]
+fn include_folder_tolerates_a_file_removed_after_listing() {
+    // a beats/ file can vanish between listing the folder and reading it (the agent archives the
+    // previous run while privacy or check loads the spec); the loader skips it instead of failing
+    let d = std::env::temp_dir().join(format!("cutroom-vanish-{}", std::process::id()));
+    std::fs::create_dir_all(d.join("beats")).unwrap();
+    std::fs::write(d.join("edit.yaml"), "source: source.json\ninclude: [beats/*.yaml]\n").unwrap();
+    std::fs::write(d.join("beats/a.yaml"), "beats: []\n").unwrap();
+    std::fs::write(d.join("beats/b.yaml"), "beats: []\n").unwrap();
+    let l = cutroom_core::spec::load(&d.join("edit.yaml")).unwrap();
+    assert!(l.spec.beats.is_empty());
+    assert_eq!(cutroom_core::spec::source_path(&d.join("edit.yaml")).unwrap(), d.join("source.json"));
+    std::fs::remove_dir_all(&d).ok();
+}

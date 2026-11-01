@@ -377,8 +377,8 @@ fn main() -> Result<()> {
         Cmd::Privacy { dir, every, allow, pattern, rules } => {
             let t = Instant::now();
             let sp = spec_path(&dir);
-            let loaded = spec::load(&sp)?;
-            let src = Source::load(&loaded.source_path)?;
+            // the recording only: privacy runs alongside the agent, which rewrites beats/
+            let src = Source::load(&spec::source_path(&sp)?)?;
             let base = sp.parent().unwrap_or(Path::new("."));
             let mut opts = cutroom_privacy::ScanOpts { every_ms: every, ..Default::default() };
             let rules_path = rules.clone().unwrap_or_else(|| base.join("privacy-rules.yaml"));

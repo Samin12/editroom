@@ -548,7 +548,13 @@ pub fn load(path: &Path) -> Result<Loaded> {
     let mut cut_origin = vec![Origin { file: file.clone(), scope: root.scope.clone() }; root.cuts.len()];
     let includes = expand_includes(&dir, &root.include)?;
     for inc in includes {
-        let s = read_spec(&inc)?;
+        let s = match read_spec(&inc) {
+            Ok(s) => s,
+            // another process (the agent archiving last run's beats) removed it after we listed the
+            // folder: a file that is gone contributes nothing
+            Err(_) if !inc.exists() => continue,
+            Err(e) => return Err(e),
+        };
         let f = rel(&inc, &dir);
         let o = Origin { file: f, scope: s.scope.clone() };
         beat_origin.extend(std::iter::repeat_n(o.clone(), s.beats.len()));
@@ -563,6 +569,14 @@ pub fn load(path: &Path) -> Result<Loaded> {
     }
     let source_path = dir.join(root.source.clone().unwrap_or_else(|| "source.json".into()));
     Ok(Loaded { spec: root, dir, source_path, beat_origin, chapter_origin, cut_origin })
+}
+
+/// The source.json a spec points at, from the root file alone (no includes). For commands that only
+/// read the recording, so they never race with agents rewriting beat files.
+pub fn source_path(path: &Path) -> Result<PathBuf> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let root: Spec = read_spec(path)?;
+    Ok(dir.join(root.source.unwrap_or_else(|| "source.json".into())))
 }
 
 fn rel(p: &Path, dir: &Path) -> String {
