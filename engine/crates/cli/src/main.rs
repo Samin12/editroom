@@ -183,6 +183,9 @@ enum Cmd {
         /// Only the cuts.
         #[arg(long)]
         cuts_only: bool,
+        /// Keep cuts.yaml as it is; redo chapters, visuals and screen marks only.
+        #[arg(long, conflicts_with = "cuts_only")]
+        visuals_only: bool,
         /// Words per editorial chunk (chunks overlap by 15%).
         #[arg(long, default_value_t = 1500)]
         chunk_words: usize,
@@ -512,8 +515,8 @@ fn main() -> Result<()> {
             );
             std::fs::write(format!("{}.report.json", stem.display()), serde_json::to_string_pretty(&r)?)?;
         }
-        Cmd::Agent { dir, model, cut_model, screen_model, jobs, no_review, no_editorial, no_screen, no_scenes, cuts_only, chunk_words } => {
-            let o = agent::AgentOpts { model, cut_model, screen_model, jobs, review: !no_review, editorial: !no_editorial, screen: !no_screen, scenes: !no_scenes, beats: !cuts_only, chunk_words };
+        Cmd::Agent { dir, model, cut_model, screen_model, jobs, no_review, no_editorial, no_screen, no_scenes, cuts_only, visuals_only, chunk_words } => {
+            let o = agent::AgentOpts { model, cut_model, screen_model, jobs, review: !no_review, editorial: !no_editorial, screen: !no_screen, scenes: !no_scenes, beats: !cuts_only, cuts: !visuals_only, chunk_words };
             let u = agent::run(&dir, &o)?;
             println!(
                 "agent: {} calls, {} input tokens ({} cached), {} output tokens, ${:.3}, {:.0}s",

@@ -106,8 +106,10 @@ pub fn extract(f: &Frame, out: &Path) -> anyhow::Result<()> {
 }
 
 /// The prompt for one window (frames are attached separately, in order).
-pub fn prompt(c: &Ctx, w: &Window) -> String {
+pub fn prompt(c: &Ctx, w: &Window, glossary: Option<&str>) -> String {
     let mut s = String::from(super::prompts::SCREEN_PROMPT);
+    s.push_str(&super::prompts::names_rule(glossary));
+    s.push('\n');
     for (i, f) in w.frames.iter().enumerate() {
         s.push_str(&format!("Image {}: the screen at {} (he is saying w{} {:?}).\n", i + 1, cutroom_core::resolve::clock(f.out_ms), f.word, c.src.words[f.word].text));
     }
