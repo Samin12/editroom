@@ -13,6 +13,8 @@ pub const CUT_PAD_MS: f64 = 120.0;
 pub const LEAD_MS: f64 = 130.0;
 /// Tail after an `until` word (ms).
 pub const TAIL_MS: f64 = 250.0;
+/// How long the last item of an open-ended list or scene stays up (ms).
+pub const READ_MS: f64 = 2500.0;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct OutWord {
@@ -50,6 +52,8 @@ pub struct ResolvedChapter {
     pub at_ms: f64,
     /// Card window, if a card is shown.
     pub card: Option<(f64, f64)>,
+    /// `output.kicker` ("Step", "Tip"; empty hides it on the card and the badge).
+    pub kicker: String,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -240,7 +244,7 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
                 }
                 CardMode::Off => (map.to_out(c.1), None),
             };
-            ResolvedChapter { n: n + 1, title: c.2.clone(), short: c.3.clone(), at_ms, card }
+            ResolvedChapter { n: n + 1, title: c.2.clone(), short: c.3.clone(), at_ms, card, kicker: spec.output.kicker.trim().to_string() }
         })
         .collect();
 
@@ -296,7 +300,10 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
                 start + lead + hold
             }
         };
-        let end = end.min(dur);
+        let mut end = end.min(dur);
+        // a list or scene with no `until`/`hold` stays until its last timed item or layer has been
+        // up long enough to read
+        let open_ended = b.until.is_none() && b.hold.is_none();
         if end <= start {
             issues.push(Issue { sev: Severity::Error, at_ms: Some(start), msg: format!("{label}: ends before it starts") });
             continue;
@@ -304,17 +311,26 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
         let mut items_ms = vec![];
         if let BeatKind::Bullets { items, .. } = &b.kind {
             let n = items.len().max(1) as f64;
+            let mut timed: Vec<Option<f64>> = vec![];
             for (k, it) in items.iter().enumerate() {
-                let t = match it {
+                timed.push(match it {
                     crate::spec::Item::At { at, .. } => match anchor::resolve(at, src, &idx, sc, &kept) {
-                        Ok(r) => anchor_out(&r, src, &map, false) - lead,
+                        Ok(r) => Some(anchor_out(&r, src, &map, false) - lead),
                         Err(e) => {
                             issues.push(Issue { sev: Severity::Error, at_ms: Some(start), msg: format!("{label}: item {k}: {e}") });
-                            start
+                            Some(start)
                         }
                     },
-                    _ => start + 350.0 + (end - start - 1500.0).max(0.0).min(700.0 * n) * k as f64 / n,
-                };
+                    _ => None,
+                });
+            }
+            if open_ended {
+                if let Some(last) = timed.iter().flatten().copied().reduce(f64::max) {
+                    end = end.max(last + READ_MS).min(dur);
+                }
+            }
+            for (k, t) in timed.into_iter().enumerate() {
+                let t = t.unwrap_or(start + 350.0 + (end - start - 1500.0).max(0.0).min(700.0 * n) * k as f64 / n);
                 items_ms.push(t.clamp(start, end));
             }
         }
@@ -336,7 +352,18 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
                 }
                 Ok(anchor_out(&r, src, &map, false) - if r.word.is_some() { lead } else { 0.0 })
             };
-            let (flat, probs) = crate::scene::resolve_times(layers, start, end, &at);
+            let (mut flat, mut probs) = crate::scene::resolve_times(layers, start, end, &at);
+            if open_ended {
+                // where the layers land with no end in the way; stretch the beat over the last entrance
+                let (free, _) = crate::scene::resolve_times(layers, start, dur, &at);
+                let last = crate::scene::unflatten(layers, &free).iter().filter_map(|t| t.enter).filter(|v| v.is_finite()).reduce(f64::max);
+                if let Some(last) = last {
+                    if last + READ_MS > end {
+                        end = (last + READ_MS).min(dur);
+                        (flat, probs) = crate::scene::resolve_times(layers, start, end, &at);
+                    }
+                }
+            }
             for (sev, m) in probs {
                 issues.push(Issue { sev, at_ms: Some(start), msg: format!("{label}: {m}") });
             }

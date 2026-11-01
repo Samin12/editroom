@@ -69,11 +69,19 @@ pub struct OutputSpec {
     /// A music bed looped under the whole video, ducked under the narration.
     #[serde(default)]
     pub music: Option<MusicSpec>,
+    /// What the chapters are called on the chapter card and the badge: "Step" shows "STEP 3 OF
+    /// 10", "Tip" shows "TIP 3 OF 10", "" hides the kicker and the big number.
+    #[serde(default = "d_kicker")]
+    pub kicker: String,
+    /// Title of the 0:00 line of chapters.txt when the first chapter starts later (YouTube
+    /// chapters must start at 0:00).
+    #[serde(default = "d_intro")]
+    pub intro: String,
 }
 
 impl Default for OutputSpec {
     fn default() -> Self {
-        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false, music: None }
+        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false, music: None, kicker: d_kicker(), intro: d_intro() }
     }
 }
 
@@ -128,6 +136,12 @@ fn d_height() -> u32 {
 }
 fn d_fps() -> f64 {
     30.0
+}
+fn d_kicker() -> String {
+    "Step".into()
+}
+fn d_intro() -> String {
+    "Intro".into()
 }
 fn d_card_ms() -> f64 {
     1800.0
@@ -541,15 +555,23 @@ pub struct Origin {
 
 pub fn load(path: &Path) -> Result<Loaded> {
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let mut root: Spec = read_spec(path)?;
+    let (mut root, root_out) = read_spec_output(path)?;
+    // `output` keys from included files apply where the root file does not set the same key
+    // (an agent's chapters file can say `output: {kicker: Tip}`; edit.yaml still wins)
+    let mut inc_out = serde_yaml::Mapping::new();
     let file = rel(path, &dir);
     let mut beat_origin = vec![Origin { file: file.clone(), scope: root.scope.clone() }; root.beats.len()];
     let mut chapter_origin = vec![Origin { file: file.clone(), scope: root.scope.clone() }; root.chapters.len()];
     let mut cut_origin = vec![Origin { file: file.clone(), scope: root.scope.clone() }; root.cuts.len()];
     let includes = expand_includes(&dir, &root.include)?;
     for inc in includes {
-        let s = match read_spec(&inc) {
-            Ok(s) => s,
+        let s = match read_spec_output(&inc) {
+            Ok((s, out)) => {
+                for (k, v) in out.into_iter().flatten() {
+                    inc_out.insert(k, v);
+                }
+                s
+            }
             // another process (the agent archiving last run's beats) removed it after we listed the
             // folder: a file that is gone contributes nothing
             Err(_) if !inc.exists() => continue,
@@ -566,6 +588,12 @@ pub fn load(path: &Path) -> Result<Loaded> {
         if !s.include.is_empty() {
             return Err(anyhow!("{}: nested include is not supported", inc.display()));
         }
+    }
+    if !inc_out.is_empty() {
+        for (k, v) in root_out.into_iter().flatten() {
+            inc_out.insert(k, v);
+        }
+        root.output = serde_yaml::from_value(serde_yaml::Value::Mapping(inc_out)).map_err(|e| anyhow!("output (edit.yaml merged with its includes): {e}"))?;
     }
     let source_path = dir.join(root.source.clone().unwrap_or_else(|| "source.json".into()));
     Ok(Loaded { spec: root, dir, source_path, beat_origin, chapter_origin, cut_origin })
@@ -629,9 +657,16 @@ pub fn flow<T: Serialize>(v: &T) -> String {
 }
 
 pub fn read_spec(path: &Path) -> Result<Spec> {
+    read_spec_output(path).map(|x| x.0)
+}
+
+/// A spec file and the `output` keys it sets itself (None when it has no `output`).
+pub fn read_spec_output(path: &Path) -> Result<(Spec, Option<serde_yaml::Mapping>)> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     if text.trim().is_empty() {
-        return Ok(Spec::default());
+        return Ok((Spec::default(), None));
     }
-    serde_yaml::from_str(&text).map_err(|e| anyhow!("{}: {e}", path.display()))
+    let spec: Spec = serde_yaml::from_str(&text).map_err(|e| anyhow!("{}: {e}", path.display()))?;
+    let out = if text.contains("output") { serde_yaml::from_str::<serde_yaml::Value>(&text).ok().and_then(|v| v.get("output").and_then(|o| o.as_mapping().cloned())) } else { None };
+    Ok((spec, out))
 }

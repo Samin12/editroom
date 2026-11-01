@@ -16,8 +16,10 @@ fn yt_clock(ms: f64) -> String {
 /// YouTube description chapters ("0:00 Intro" first; times land on the cards).
 pub fn chapters(plan: &Plan) -> String {
     let mut out = String::new();
+    // YouTube chapters must start at 0:00: a first chapter that starts later gets an intro line
     if plan.chapters.first().map(|c| c.at_ms > 1000.0).unwrap_or(true) {
-        out.push_str("0:00 Intro\n");
+        let intro = plan.output.intro.trim();
+        out.push_str(&format!("0:00 {}\n", if intro.is_empty() { "Intro" } else { intro }));
     }
     for (i, c) in plan.chapters.iter().enumerate() {
         let t = if i == 0 && c.at_ms <= 1000.0 { 0.0 } else { c.at_ms };

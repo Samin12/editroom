@@ -88,7 +88,7 @@ See [docs/DESIGN.md](docs/DESIGN.md). In short:
 # work/edit.yaml
 source: source.json
 include: [cuts.yaml, beats/*.yaml]          # cuts from `cut`, beats from agents (one file per chapter)
-output: {height: 1080, fps: 30, chapter_cards: insert, card_ms: 1800}
+output: {height: 1080, fps: 30, chapter_cards: insert, card_ms: 1800, kicker: Tip, intro: Why Voice Wins}
 layout: {default: panel}
 chapters:
   - {at: "the first thing you need", title: Find the idea, short: Idea}
@@ -99,6 +99,12 @@ beats:
   - {at: w1400, kind: ring, rect: [0.62, 0.08, 0.2, 0.06]}
   - {at: s:2014.5, until: s:2031.0, kind: blur, rects: [[0.05, 0.3, 0.4, 0.05]]}
 ```
+
+`output.kicker` names the chapters on the card and the badge ("Tip" shows "TIP 3 OF 10"; `""`
+hides the kicker and the big number; default "Step"). `output.intro` titles the 0:00 line of
+chapters.txt when the first chapter starts after the hook. `output` keys set in an included file
+(the agent writes them into `beats/00-chapters.yaml`) apply wherever edit.yaml does not set the
+same key.
 
 Anchors: `w123` (word id from `cutroom brief`), `"a phrase"` (`#2` for the second match),
 `s:754.2` (source seconds, survives cuts), `o:61.5` (output seconds), `+0.5s` offsets.

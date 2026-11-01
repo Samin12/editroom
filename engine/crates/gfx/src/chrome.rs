@@ -37,19 +37,22 @@ pub(crate) fn chapter_card(g: &Gfx, pm: &mut Pixmap, ch: &ResolvedChapter, total
     let lift = (1.0 - out) * -14.0 * s;
     let n = ch.n.max(1);
 
-    // Giant ghost step number.
-    let ghost = ease_out(prog(lt, 120.0, 900.0));
+    // Giant ghost step number (none when the chapters are not numbered).
+    let numbered = !ch.kicker.trim().is_empty();
+    let ghost = if numbered { ease_out(prog(lt, 120.0, 900.0)) } else { 0.0 };
     let gst = Style::new(FontId::Bold, 560.0 * s).ls(-0.06);
     let base = 120.0 * s + 0.863 * gst.size;
     tx.draw_line(pm, gst, &format!("{n:02}"), 60.0 * s - (1.0 - ghost) * 40.0 * s, base + lift, pal.accent_soft, ghost * out, full);
 
     // Kicker with its rule.
     let kp = ease_out(prog(lt, 200.0, 420.0));
-    let kicker = if total > 0 { format!("STEP {n} OF {total}") } else { format!("CHAPTER {n}") };
+    let kicker = kicker_text(ch, total);
     let kst = Style::new(FontId::Bold, 30.0 * s).ls(0.16);
     let ky = 300.0 * s + lift;
-    fill_rrect(pm, 132.0 * s, ky + 15.0 * s - 2.0 * s, 48.0 * s * kp, 4.0 * s, 2.0 * s, pal.accent, out);
-    tx.draw_line(pm, kst, &kicker, 132.0 * s + 66.0 * s - (1.0 - kp) * 16.0 * s, ky + 15.0 * s + 0.36 * kst.size, pal.accent, kp * out, full);
+    if !kicker.is_empty() {
+        fill_rrect(pm, 132.0 * s, ky + 15.0 * s - 2.0 * s, 48.0 * s * kp, 4.0 * s, 2.0 * s, pal.accent, out);
+        tx.draw_line(pm, kst, &kicker, 132.0 * s + 66.0 * s - (1.0 - kp) * 16.0 * s, ky + 15.0 * s + 0.36 * kst.size, pal.accent, kp * out, full);
+    }
 
     // Title, building word by word.
     let title = ch.title.trim();
@@ -141,6 +144,16 @@ fn tracker(g: &Gfx, pm: &mut Pixmap, pal: &Pal, cur: usize, total: usize, lt: f6
     }
 }
 
+/// "TIP 3 OF 10" ("TIP 3" without a total; "" when chapters are not numbered).
+pub(crate) fn kicker_text(ch: &ResolvedChapter, total: usize) -> String {
+    let k = ch.kicker.trim().to_uppercase();
+    match (k.is_empty(), total) {
+        (true, _) => String::new(),
+        (false, 0) => format!("{k} {}", ch.n),
+        (false, t) => format!("{k} {} OF {t}", ch.n),
+    }
+}
+
 /// The badge layer: a pill ("STEP n" + short title) for flat rects, a small card with a
 /// segment bar for taller ones.
 fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal: &Pal) -> Img {
@@ -160,11 +173,11 @@ fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal:
         let padx = ph * 0.42;
         let mut kst = Style::new(FontId::Bold, 17.0 * k).ls(0.14);
         let mut tst = Style::new(FontId::SemiBold, 22.0 * k).ls(-0.01);
-        let kick = format!("STEP {}", ch.n);
+        let kick = kicker_text(ch, 0);
         let dot = 9.0 * k;
         let gap = 12.0 * k;
         loop {
-            let need = padx * 2.0 + dot + gap * 2.0 + tx.width(kst, &kick) + tx.width(tst, short);
+            let need = padx * 2.0 + dot + gap * 2.0 + if kick.is_empty() { -gap } else { tx.width(kst, &kick) } + tx.width(tst, short);
             if need <= wf || tst.size < 6.0 {
                 break;
             }
@@ -174,8 +187,10 @@ fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal:
         let cy = py + ph * 0.5;
         fill_circle(&mut pm, padx + dot * 0.5, cy, dot * 0.5, pal.accent, 1.0);
         let mut x = padx + dot + gap;
-        tx.draw_line(&mut pm, kst, &kick, x, cy + 0.36 * kst.size, pal.accent, 1.0, clip);
-        x += tx.width(kst, &kick) + gap;
+        if !kick.is_empty() {
+            tx.draw_line(&mut pm, kst, &kick, x, cy + 0.36 * kst.size, pal.accent, 1.0, clip);
+            x += tx.width(kst, &kick) + gap;
+        }
         tx.draw_line(&mut pm, tst, short, x, cy + 0.36 * tst.size, pal.ink, 1.0, clip);
     } else {
         // Card (authored at 354 x 150).
@@ -187,7 +202,7 @@ fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal:
         let (px, py) = (inset + 20.0 * k, inset + 16.0 * k);
         let inner_w = cw - 40.0 * k;
         let kst = Style::new(FontId::Bold, 17.0 * k).ls(0.16);
-        let kick = format!("STEP {} OF {}", ch.n, total);
+        let kick = kicker_text(ch, total);
         fill_circle(&mut pm, px + 5.0 * k, py + 10.0 * k, 5.0 * k, pal.accent, 1.0);
         tx.draw_line(&mut pm, kst, &kick, px + 20.0 * k, py + 10.0 * k + 0.36 * kst.size, pal.accent, 1.0, clip);
         let seg_h = 7.0 * k;
@@ -221,7 +236,7 @@ pub(crate) fn badge(g: &Gfx, pm: &mut Pixmap, rect: Rect, ch: &ResolvedChapter, 
     }
     let pal = g.pal();
     let short = ch.short.clone();
-    let key = hash_of(&("badge", r.w(), r.h(), ch.n, total, &short, &ch.title, &pal));
+    let key = hash_of(&("badge", r.w(), r.h(), ch.n, total, &short, &ch.title, &ch.kicker, &pal));
     let img = g.layer(key, || badge_layer(g, r.w() as u32, r.h() as u32, ch, total, &pal));
     let t0 = ch.card.map(|c| c.1).unwrap_or(ch.at_ms);
     let dt = t_ms - t0;

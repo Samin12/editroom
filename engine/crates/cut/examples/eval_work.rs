@@ -87,12 +87,8 @@ fn main() -> anyhow::Result<()> {
         let t = truth(&src, &kept);
         let gt = t.iter().filter(|x| **x == Some(true)).count();
         let judged = t.iter().filter(|x| x.is_some()).count();
-        let sets: Vec<(&str, Box<dyn Fn(Option<&str>) -> bool>)> = vec![
-            ("detector", Box::new(|b: Option<&str>| b.is_none())),
-            ("all", Box::new(|_: Option<&str>| true)),
-        ];
-        for (name, f) in sets {
-            let p = removed(&loaded, &src, f);
+        for (name, detector_only) in [("detector", true), ("all", false)] {
+            let p = removed(&loaded, &src, |b: Option<&str>| !detector_only || b.is_none());
             let (tp, fp, fn_) = score(&p, &t);
             let pr = tp as f64 / (tp + fp).max(1) as f64;
             let rc = tp as f64 / (tp + fn_).max(1) as f64;

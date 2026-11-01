@@ -153,3 +153,93 @@ fn include_folder_tolerates_a_file_removed_after_listing() {
     assert_eq!(cutroom_core::spec::source_path(&d.join("edit.yaml")).unwrap(), d.join("source.json"));
     std::fs::remove_dir_all(&d).ok();
 }
+
+fn work_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("cutroom-core-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("beats")).unwrap();
+    source().save(&dir.join("source.json")).unwrap();
+    dir
+}
+
+#[test]
+fn output_keys_from_includes_apply_where_edit_yaml_is_silent() {
+    let dir = work_dir("kicker");
+    std::fs::write(dir.join("edit.yaml"), "source: source.json\ninclude: [beats/*.yaml]\noutput: {height: 720, chapter_cards: off}\n").unwrap();
+    std::fs::write(dir.join("beats/00-chapters.yaml"), "output: {kicker: Tip, intro: Why Voice Wins, height: 1080}\nchapters:\n  - {at: \"first open the board\", title: Open the board}\n").unwrap();
+    let l = spec::load(&dir.join("edit.yaml")).unwrap();
+    assert_eq!(l.spec.output.kicker, "Tip");
+    assert_eq!(l.spec.output.intro, "Why Voice Wins");
+    assert_eq!(l.spec.output.height, 720, "edit.yaml wins over an include");
+    let plan = build(&l, &source());
+    assert_eq!(plan.chapters[0].kicker, "Tip");
+    // the root can set it too, and an empty kicker is kept
+    std::fs::write(dir.join("edit.yaml"), "source: source.json\ninclude: [beats/*.yaml]\noutput: {kicker: \"\"}\n").unwrap();
+    assert_eq!(spec::load(&dir.join("edit.yaml")).unwrap().spec.output.kicker, "");
+    // defaults without any output
+    let (p, _, _) = plan_for("chapters:\n  - {at: w0, title: Hi}\n");
+    assert_eq!((p.output.kicker.as_str(), p.output.intro.as_str(), p.chapters[0].kicker.as_str()), ("Step", "Intro", "Step"));
+}
+
+#[test]
+fn counters_reject_digits_in_prefix_and_suffix() {
+    let (plan, src, dir) = plan_for(
+        r#"
+beats:
+  - {at: w0, kind: scene, layers: [{type: counter, to: 250, prefix: "250+ ", x: 0.5, y: 0.5}, {type: counter, to: 250, suffix: "+ wpm", x: 0.5, y: 0.7}]}
+"#,
+    );
+    let issues = check(&plan, &src, &segments(&plan, &src), &dir, &[]);
+    let bad: Vec<_> = issues.iter().filter(|i| i.sev == Severity::Error && i.msg.contains("has a digit")).collect();
+    assert_eq!(bad.len(), 1, "{issues:?}");
+    assert!(bad[0].msg.contains("prefix"));
+}
+
+#[test]
+fn open_ended_lists_and_scenes_stay_until_their_last_item_reads() {
+    // items on w16 and w22 (3.2 s and 5.6 s after w8); the default hold ends the list ~5.2 s in
+    let (plan, src, dir) = plan_for(
+        r#"
+beats:
+  - {at: w8, kind: bullets, items: [{text: one, at: w8}, {text: two, at: w16}, {text: three, at: w22}]}
+  - {at: w0, kind: scene, layers: [{type: text, text: Hi, x: 0.1, y: 0.1}, {type: text, text: later, x: 0.1, y: 0.5, in: {at: w6}}]}
+"#,
+    );
+    let list = plan.beats.iter().find(|b| b.kind.name() == "bullets").unwrap();
+    let w22 = plan.words.iter().find(|w| w.id == 22).unwrap();
+    assert!(list.end_ms >= w22.start_ms - 130.0 + 2400.0 && list.end_ms <= plan.duration_ms(), "{} vs {}", list.end_ms, w22.start_ms);
+    assert!(list.items_ms[2] < list.end_ms - 2000.0);
+    let scene = plan.beats.iter().find(|b| b.kind.name() == "scene").unwrap();
+    let w6 = plan.words.iter().find(|w| w.id == 6).unwrap();
+    assert!(scene.end_ms >= w6.start_ms - 130.0 + 2400.0, "the scene stays until its last layer reads");
+    let issues = check(&plan, &src, &segments(&plan, &src), &dir, &[]);
+    assert!(!issues.iter().any(|i| i.msg.contains("too late to read")), "{issues:?}");
+
+    // with an explicit end, a late item is a warning instead
+    let (plan, src, dir) = plan_for("beats:\n  - {at: w8, until: w20, kind: bullets, items: [{text: one, at: w8}, {text: two, at: w20}]}\n");
+    let list = &plan.beats[0];
+    let w20 = plan.words.iter().find(|w| w.id == 20).unwrap();
+    assert!((list.end_ms - (w20.end_ms + 250.0)).abs() < 1.0, "an explicit until is kept");
+    let issues = check(&plan, &src, &segments(&plan, &src), &dir, &[]);
+    assert!(issues.iter().any(|i| i.sev == Severity::Warn && i.msg.contains("item \"two\"") && i.msg.contains("too late to read")), "{issues:?}");
+}
+
+#[test]
+fn numbered_kickers_follow_the_chapter_order() {
+    let yaml = |kicker: &str, title_kicker: &str| {
+        format!(
+            "output: {{kicker: \"{kicker}\", chapter_cards: off}}\nchapters:\n  - {{at: w0, title: One}}\n  - {{at: \"first open the board\", title: Two}}\nbeats:\n  - {{at: \"paste your key\", kind: title, kicker: \"{title_kicker}\", text: Paste it}}\n"
+        )
+    };
+    let warns = |y: String| {
+        let (plan, src, dir) = plan_for(&y);
+        check(&plan, &src, &segments(&plan, &src), &dir, &[]).into_iter().filter(|i| i.msg.contains("follow the chapter order")).count()
+    };
+    assert_eq!(warns(yaml("Tip", "TIP 1")), 1, "TIP 1 inside chapter 2");
+    assert_eq!(warns(yaml("Tip", "Tip #2")), 0);
+    assert_eq!(warns(yaml("Tip", "TIPPING POINT")), 0);
+    assert_eq!(warns(yaml("", "TIP 1")), 0, "no kicker, no numbering to check");
+    assert_eq!(cutroom_core::lint::numbered("Step 3: paste", "Step"), Some(("step".into(), 3)));
+    assert_eq!(cutroom_core::lint::numbered("Steps 3", "Step"), None);
+    assert_eq!(cutroom_core::lint::numbered("TIP 12", "tip"), Some(("tip".into(), 12)));
+}

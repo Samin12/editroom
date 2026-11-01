@@ -29,6 +29,13 @@ layout:
 Per stretch: a `layout` beat, e.g. `{at: w900, until: w1100, kind: layout, mode: camera}` for a long
 talking-head stretch with nothing on screen, or `mode: screen` for a full-width demo.
 
+## Chapter kicker
+
+The chapter card and the badge read `output.kicker` + the chapter number: "Tip" shows "TIP 3 OF 10",
+"Step" (the default) "STEP 3 OF 10", and `""` hides the kicker and the big number. The agent's
+chapters pass sets it from how he numbers his points, with `output.intro` (the 0:00 line of
+chapters.txt), in `beats/00-chapters.yaml`; a value in `edit.yaml` wins over it.
+
 ## Music bed
 
 `--music bed.mp3` on the pipeline copies it to `W/music/` and sets (engine reference: `engine/docs/AUDIO.md`):

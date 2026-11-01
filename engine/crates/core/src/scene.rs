@@ -502,6 +502,14 @@ pub fn lint(layers: &[Layer], place: Place, spec_dir: &Path, camera: Option<Rect
         if l.style.is_some() && l.ty == T::Text && !l.text.as_deref().unwrap_or("").contains('*') {
             err!(Severity::Warn, format!("{name}: `style` marks the *accent* words, and this text has none"));
         }
+        if l.ty == T::Counter {
+            // the number is drawn between them: a digit here shows twice ("250+ 250")
+            for (f, v) in [("prefix", &l.prefix), ("suffix", &l.suffix)] {
+                if let Some(v) = v.as_deref().filter(|v| v.chars().any(|c| c.is_ascii_digit())) {
+                    err!(Severity::Error, format!("{name}: counter `{f}` {v:?} has a digit; the number goes in `to`, and {f} is a symbol or unit only ($, +, %, x, k, wpm)"));
+                }
+            }
+        }
         if l.sub.is_some() && l.label.is_none() && l.ty == T::Box {
             err!(Severity::Warn, format!("{name}: `sub` shows only under a `label`"));
         }

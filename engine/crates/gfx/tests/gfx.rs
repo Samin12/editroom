@@ -301,7 +301,7 @@ fn frame_level_overlays_stay_in_frame_and_near_their_spot() {
 #[test]
 fn chapter_card_badge_and_captions() {
     let g = gfx();
-    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 10_000.0, card: Some((10_000.0, 11_800.0)) };
+    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 10_000.0, card: Some((10_000.0, 11_800.0)), kicker: "Step".into() };
     for t in [10_000.0, 10_700.0, 11_790.0] {
         let mut a = frame();
         g.chapter_card(&mut a, &ch, 8, t);
@@ -381,6 +381,35 @@ fn higher_resolutions_scale() {
     for b in stage_beats() {
         g.stage(&mut pm, p, &b, 3000.0, None);
     }
-    let ch = ResolvedChapter { n: 1, title: "Intro".into(), short: "Intro".into(), at_ms: 0.0, card: None };
+    let ch = ResolvedChapter { n: 1, title: "Intro".into(), short: "Intro".into(), at_ms: 0.0, card: None, kicker: "Step".into() };
     g.chapter_card(&mut pm, &ch, 4, 500.0);
+}
+
+#[test]
+fn chapter_kicker_follows_output_kicker() {
+    let g = gfx();
+    let step = ResolvedChapter { n: 3, title: "Talk instead of typing".into(), short: "Voice".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into() };
+    let tip = ResolvedChapter { kicker: "Tip".into(), ..step.clone() };
+    let none = ResolvedChapter { kicker: String::new(), ..step.clone() };
+    let card = |ch: &ResolvedChapter| {
+        let mut pm = frame();
+        g.chapter_card(&mut pm, ch, 10, 1200.0);
+        pm
+    };
+    let (a, b, c) = (card(&step), card(&tip), card(&none));
+    assert!(a.data() != b.data(), "TIP 3 OF 10 is drawn instead of STEP 3 OF 10");
+    assert!(a.data() != c.data() && b.data() != c.data(), "an empty kicker hides the kicker and the big number");
+    // the kicker line sits in the card's upper left: with no kicker that band is plain card
+    let band = Rect::from_xywh(0.0, 0.0, W as f32 * 0.5, H as f32 * 0.3).unwrap();
+    assert!(diff_inside(&a, &c, band) > 100);
+    for rect in [Rect::from_xywh(1000.0, 40.0, 236.0, 100.0).unwrap(), Rect::from_xywh(1000.0, 40.0, 236.0, 40.0).unwrap()] {
+        let badge = |ch: &ResolvedChapter| {
+            let mut pm = frame();
+            g.badge(&mut pm, rect, ch, 10, 20_000.0);
+            pm
+        };
+        let (x, y, z) = (badge(&step), badge(&tip), badge(&none));
+        assert!(x.data() != y.data() && x.data() != z.data(), "the badge follows the kicker");
+        assert_eq!(changed_outside(&z, rect, 0.0), 0);
+    }
 }

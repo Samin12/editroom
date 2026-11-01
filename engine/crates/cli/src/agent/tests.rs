@@ -421,3 +421,49 @@ fn screen_prompt_carries_the_names_rule() {
     let p = screen::prompt(&c, &w, Some("Claude Code"));
     assert!(p.contains("glossary: Claude Code.") && p.contains("never put a misspelled transcript word on screen"));
 }
+
+#[test]
+fn chapters_answers_set_the_kicker_and_intro_and_start_after_the_hook() {
+    // 400 words at 400 ms: a 2:42 video, long enough to have a hook
+    let text = (0..400).map(|i| if i % 10 == 9 { "end." } else { "word" }).collect::<Vec<_>>().join(" ");
+    let src = source(&text);
+    let dir = work("hook", &src);
+    let (base, src, _) = load(&dir).unwrap();
+    let file = "beats/00-chapters.yaml";
+    let on_hook: Spec = serde_yaml::from_str("chapters:\n  - {at: w0, title: Talk Instead Of Typing}\n  - {at: w200, title: Build While You Sleep}\n").unwrap();
+    let errs = beats::chapter_gap_errors(&base, &src, file, &on_hook);
+    assert!(errs.iter().any(|e| e.contains("hook")), "{errs:?}");
+    let after: Spec = serde_yaml::from_str("chapters:\n  - {at: w60, title: Talk Instead Of Typing}\n  - {at: w200, title: Build While You Sleep}\n").unwrap();
+    assert!(beats::chapter_gap_errors(&base, &src, file, &after).is_empty());
+
+    // the answer's output keys are kept (only kicker and intro), and the file loads with them
+    let ans = "output: {kicker: Tip, intro: Why Voice Beats Typing, height: 4320}\nchapters:\n  - {at: w60, title: Talk Instead Of Typing}\n";
+    let out = beats::agent_output(ans).unwrap();
+    assert!(out.contains("\"kicker\":\"Tip\"") && out.contains("Why Voice Beats Typing") && !out.contains("4320"), "{out}");
+    assert_eq!(beats::agent_output("output: {kicker: null}\nchapters: []\n").unwrap(), "output: {\"kicker\":\"\"}\n");
+    assert_eq!(beats::agent_output("chapters: []\n"), None);
+    std::fs::write(dir.join(file), format!("{out}{}", beats::render_file(&after))).unwrap();
+    let (loaded, src, plan) = load(&dir).unwrap();
+    assert_eq!(loaded.spec.output.kicker, "Tip");
+    assert_eq!(plan.chapters[0].kicker, "Tip");
+    // YouTube needs 0:00: the intro line comes first
+    let txt = cutroom_render::outputs::chapters(&plan);
+    assert!(txt.starts_with("0:00 Why Voice Beats Typing\n"), "{txt}");
+    assert_eq!(txt.lines().count(), 3);
+    let _ = src;
+}
+
+#[test]
+fn prompts_carry_chapter_numbers_honesty_and_counter_rules() {
+    let cp = prompts::chapter_prompt(None);
+    for k in ["AFTER his hook", "output.intro", "output.kicker", "TIP 3 OF 10", "chapter n is his point n"] {
+        assert!(cp.contains(k), "chapter prompt misses {k}");
+    }
+    assert!(prompts::chapter_context(6, 10, "Ship Daily", "Tip").contains("TIP 6, never another number"));
+    assert!(prompts::chapter_context(6, 10, "Ship Daily", "").contains("does not number"));
+    assert!(prompts::chapter_context(0, 10, "", "Tip").contains("intro, before chapter 1"));
+    let bp = prompts::beats_prompt(&prompts::BeatsOpts { scenes: true, ..Default::default() });
+    for k in ["Subscriptions beat API pricing", "Built in 15 minutes", "for me", "never digits"] {
+        assert!(bp.contains(k), "beats prompt misses {k}");
+    }
+}
