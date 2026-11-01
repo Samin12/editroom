@@ -175,6 +175,8 @@ pub fn render(plan: &Plan, src: &Source, segs: &[Seg], dir: &Path, opts: &Render
         p
     });
     std::fs::create_dir_all(&work)?;
+    // absolute: the concat list resolves relative entries against its own folder
+    let work = work.canonicalize().unwrap_or(work);
     let ctx = ctx(plan, src, segs, dir)?;
     let parts = chunks(f0, f1, opts.jobs, fps);
     let total_frames = f1 - f0;
