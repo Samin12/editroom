@@ -18,7 +18,18 @@ fn card_bg(w: u32, h: u32, pal: &Pal) -> Img {
     Img::from_pixmap(pm)
 }
 
+/// What a chapter card shows: the group's title on a group card, else the chapter's.
+fn card_title(ch: &ResolvedChapter) -> &str {
+    match &ch.group {
+        Some(gr) if gr.card => gr.title.trim(),
+        _ => ch.title.trim(),
+    }
+}
+
 pub(crate) fn chapter_card(g: &Gfx, pm: &mut Pixmap, ch: &ResolvedChapter, total: usize, t_ms: f64) {
+    if g.theme.card_style == cutroom_core::spec::CardStyle::Rea {
+        return rea_card(g, pm, ch, t_ms);
+    }
     let (a, b) = ch.card.unwrap_or((ch.at_ms, ch.at_ms + 1800.0));
     let mut ck = Clock::new(t_ms, a, b);
     ck.lt = ck.lt.clamp(0.0, ck.dur);
@@ -37,6 +48,11 @@ pub(crate) fn chapter_card(g: &Gfx, pm: &mut Pixmap, ch: &ResolvedChapter, total
     let lift = (1.0 - out) * -14.0 * s;
     let n = ch.n.max(1);
 
+    // a group card counts groups, not chapters
+    let (n, total) = match &ch.group {
+        Some(gr) if gr.card => (gr.n.max(1), gr.of),
+        _ => (n, total),
+    };
     // Giant ghost step number (none when the chapters are not numbered).
     let numbered = !ch.kicker.trim().is_empty();
     let ghost = if numbered { ease_out(prog(lt, 120.0, 900.0)) } else { 0.0 };
@@ -55,7 +71,7 @@ pub(crate) fn chapter_card(g: &Gfx, pm: &mut Pixmap, ch: &ResolvedChapter, total
     }
 
     // Title, building word by word.
-    let title = ch.title.trim();
+    let title = card_title(ch);
     let toks = tokens(title, true);
     let pref = if title.chars().count() > 26 { 104.0 } else { 124.0 };
     let tb = tx.fit(&toks, Style::new(FontId::Bold, pref * s).ls(-0.035).lh(1.04), 1560.0 * s, 3, 400.0 * s, 64.0 * s);
@@ -76,6 +92,91 @@ pub(crate) fn chapter_card(g: &Gfx, pm: &mut Pixmap, ch: &ResolvedChapter, total
     if wipe < 1.0 {
         raster::fill_rect(pm, IRect::new(0, 0, (w as f32 * (1.0 - wipe)).round() as i32, h as i32), pal.accent);
     }
+}
+
+/// The REA card (the tips edit): a white sheet with a light grid centred on the frame, the
+/// title in black, its words fading in one after another, a soft shadow under them. Cuts in and
+/// out on the frame. Measured from the tips edit: #FEFEFE paper, #EFEFEF lines on a 95 px grid
+/// (1080p) centred on the frame, ~97 px bold title, words ~180 ms apart.
+fn rea_card(g: &Gfx, pm: &mut Pixmap, ch: &ResolvedChapter, t_ms: f64) {
+    let (a, _) = ch.card.unwrap_or((ch.at_ms, ch.at_ms + 1500.0));
+    let lt = (t_ms - a).max(0.0);
+    let s = g.scale;
+    let (w, h) = (pm.width(), pm.height());
+    let full = IRect::of(pm);
+    let paper = g.layer(hash_of(&("rea-paper", w, h)), || rea_paper(w, h, s));
+    blit_img(pm, &paper, 0, 0, 1.0, full);
+    let tx = g.text();
+    let title = card_title(ch);
+    let toks = tokens(title, true);
+    let mut tb = tx.fit(&toks, Style::new(FontId::Bold, 97.0 * s).ls(-0.03).lh(1.05), 1500.0 * s, 2, 360.0 * s, 52.0 * s);
+    let bw = tb.w;
+    tb.center(bw);
+    let x0 = (w as f32 - tb.w) * 0.5;
+    let y0 = (h as f32 - tb.h()) * 0.5;
+    let blur = 9.0 * s;
+    for (i, wd) in tb.words.iter().enumerate() {
+        let p = ease_out(prog(lt, 150.0 + 180.0 * i as f64, 260.0));
+        if p <= 0.0 {
+            continue;
+        }
+        let rise = (1.0 - p) * 6.0 * s;
+        let bx = x0 + wd.x;
+        let by = y0 + tb.baseline(wd.line) + rise;
+        // shadow: the word's own glyphs, blurred, a little below
+        let run = tx.run(tb.style, &wd.text);
+        let sh = g.layer(hash_of(&("rea-shadow", &wd.text, tb.style.size.to_bits(), (blur * 4.0) as u32)), || shadow_of(&run, blur));
+        blit_img(pm, &sh, (bx + sh_off(run.ox)).round() as i32, (by + 8.0 * s + sh_off(run.oy)).round() as i32, 0.20 * p, full);
+        tx.draw_word(pm, &tb, wd, x0, y0 + rise, [0, 0, 0], p, full);
+    }
+}
+
+/// Where a shadow image built by [`shadow_of`] goes relative to its run's origin.
+fn sh_off(o: i32) -> f32 {
+    o as f32 - SHADOW_PAD as f32
+}
+
+const SHADOW_PAD: i32 = 32;
+
+/// A run's glyph mask, padded and blurred, as a black image.
+fn shadow_of(run: &crate::raster::Sprite, blur: f32) -> Img {
+    let pad = SHADOW_PAD as u32;
+    let (w, h) = (run.w + 2 * pad, run.h + 2 * pad);
+    let mut a = vec![0u8; (w * h) as usize];
+    for y in 0..run.h {
+        let src = &run.data[(y * run.w) as usize..((y + 1) * run.w) as usize];
+        let dst = ((y + pad) * w + pad) as usize;
+        a[dst..dst + run.w as usize].copy_from_slice(src);
+    }
+    raster::blur_a8(&mut a, w as usize, h as usize, blur / 2.0);
+    let Some(mut pm) = Pixmap::new(w, h) else { return Img::default() };
+    for (px, &v) in pm.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(&a) {
+        px.copy_from_slice(&[0, 0, 0, v]);
+    }
+    Img::from_pixmap(pm)
+}
+
+/// The REA paper: near-white with a light grid whose cells are centred on the frame.
+fn rea_paper(w: u32, h: u32, s: f32) -> Img {
+    let Some(mut pm) = Pixmap::new(w.max(1), h.max(1)) else { return Img::default() };
+    pm.fill(Color::from_rgba8(254, 254, 254, 255));
+    let pitch = 95.0 * s;
+    let lw = (1.5 * s).max(1.0);
+    let line: Rgb = [239, 239, 239];
+    let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+    // vertical lines at cx + pitch/2 + k*pitch, horizontal at cy + pitch/2 + k*pitch
+    let first = |c: f32| c + pitch * 0.5 - ((c + pitch * 0.5) / pitch).floor() * pitch;
+    let mut x = first(cx);
+    while x < w as f32 {
+        fill_rrect(&mut pm, x - lw * 0.5, 0.0, lw, h as f32, 0.0, line, 1.0);
+        x += pitch;
+    }
+    let mut y = first(cy);
+    while y < h as f32 {
+        fill_rrect(&mut pm, 0.0, y - lw * 0.5, w as f32, lw, 0.0, line, 1.0);
+        y += pitch;
+    }
+    Img::from_pixmap(pm)
 }
 
 /// The step tracker: done steps filled with a check, the current one in accent with a pulse,
@@ -144,8 +245,30 @@ fn tracker(g: &Gfx, pm: &mut Pixmap, pal: &Pal, cur: usize, total: usize, lt: f6
     }
 }
 
+/// The kicker of a grouped chapter: "TIPS 1–5 · 1 / 3" ("TIP 4 · 2 / 3" for a one-chapter group,
+/// "1 / 3" without a kicker word, "INTRO" before the first chapter).
+pub(crate) fn group_kicker(ch: &ResolvedChapter) -> Option<String> {
+    let gr = ch.group.as_ref()?;
+    if gr.n == 0 {
+        return Some("INTRO".into());
+    }
+    let k = ch.kicker.trim().to_uppercase();
+    let count = format!("{} / {}", gr.n, gr.of);
+    Some(if k.is_empty() {
+        count
+    } else if gr.first == gr.last {
+        format!("{k} {} · {count}", gr.first)
+    } else {
+        let plural = if k.ends_with('S') { k.clone() } else { format!("{k}S") };
+        format!("{plural} {}\u{2013}{} · {count}", gr.first, gr.last)
+    })
+}
+
 /// "TIP 3 OF 10" ("TIP 3" without a total; "" when chapters are not numbered).
 pub(crate) fn kicker_text(ch: &ResolvedChapter, total: usize) -> String {
+    if let Some(gk) = group_kicker(ch) {
+        return gk;
+    }
     let k = ch.kicker.trim().to_uppercase();
     match (k.is_empty(), total) {
         (true, _) => String::new(),
@@ -162,7 +285,16 @@ fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal:
     let (wf, hf) = (w as f32, h as f32);
     let clip = IRect::of(&pm);
     let bg: Rgb = [38, 36, 33];
-    let short = if ch.short.trim().is_empty() { ch.title.trim() } else { ch.short.trim() };
+    let short = match &ch.group {
+        Some(gr) => gr.title.trim(),
+        None if ch.short.trim().is_empty() => ch.title.trim(),
+        None => ch.short.trim(),
+    };
+    // grouped: one segment per group, done and current in accent (the tips look)
+    let (total, cur, grouped) = match &ch.group {
+        Some(gr) => (gr.of, gr.n, true),
+        None => (total, ch.n, false),
+    };
     if hf < wf * 0.3 || total == 0 {
         // Pill.
         let ph = hf.min(wf * 0.3);
@@ -201,7 +333,7 @@ fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal:
         stroke_rrect(&mut pm, inset + 0.75 * k, inset + 0.75 * k, cw - 1.5 * k, chh - 1.5 * k, 22.0 * k, 1.5 * k, pal.white, 0.16);
         let (px, py) = (inset + 20.0 * k, inset + 16.0 * k);
         let inner_w = cw - 40.0 * k;
-        let kst = Style::new(FontId::Bold, 17.0 * k).ls(0.16);
+        let kst = Style::new(FontId::Bold, if grouped { 15.5 } else { 17.0 } * k).ls(0.16);
         let kick = kicker_text(ch, total);
         fill_circle(&mut pm, px + 5.0 * k, py + 10.0 * k, 5.0 * k, pal.accent, 1.0);
         tx.draw_line(&mut pm, kst, &kick, px + 20.0 * k, py + 10.0 * k + 0.36 * kst.size, pal.accent, 1.0, clip);
@@ -209,16 +341,22 @@ fn badge_layer(g: &Gfx, w: u32, h: u32, ch: &ResolvedChapter, total: usize, pal:
         let seg_y = inset + chh - 16.0 * k - seg_h;
         let title_top = py + 30.0 * k;
         let avail = seg_y - 8.0 * k - title_top;
-        let pref = if short.chars().count() > 24 { 23.0 } else { 26.0 };
-        let tb = tx.fit(&tokens(short, false), Style::new(FontId::Bold, pref * k).ls(-0.02).lh(1.08), inner_w, 2, avail, 14.0 * k);
+        // grouped (the tips look): a bigger, wider title
+        let pref = match (grouped, short.chars().count() > 24) {
+            (true, _) => 31.0,
+            (false, true) => 23.0,
+            (false, false) => 26.0,
+        };
+        let ls = if grouped { 0.012 } else { -0.02 };
+        let tb = tx.fit(&tokens(short, false), Style::new(FontId::Bold, pref * k).ls(ls).lh(1.08), inner_w, 2, avail, 14.0 * k);
         tx.draw(&mut pm, &tb, px, title_top + (avail - tb.h()) * 0.5, &[pal.ink], 1.0, clip);
         let sgap = 6.0 * k;
         let sw = (inner_w - sgap * (total as f32 - 1.0)) / total as f32;
         for i in 0..total {
             let step = i + 1;
-            let (col, a) = if step < ch.n {
-                (pal.ink, 1.0)
-            } else if step == ch.n {
+            let (col, a) = if step < cur {
+                (if grouped { pal.accent } else { pal.ink }, 1.0)
+            } else if step == cur {
                 (pal.accent, 1.0)
             } else {
                 (pal.white, 0.18)
@@ -236,10 +374,12 @@ pub(crate) fn badge(g: &Gfx, pm: &mut Pixmap, rect: Rect, ch: &ResolvedChapter, 
     }
     let pal = g.pal();
     let short = ch.short.clone();
-    let key = hash_of(&("badge", r.w(), r.h(), ch.n, total, &short, &ch.title, &ch.kicker, &pal));
+    let key = hash_of(&("badge", r.w(), r.h(), ch.n, total, &short, &ch.title, &ch.kicker, &pal, format!("{:?}", ch.group)));
     let img = g.layer(key, || badge_layer(g, r.w() as u32, r.h() as u32, ch, total, &pal));
     let t0 = ch.card.map(|c| c.1).unwrap_or(ch.at_ms);
-    let dt = t_ms - t0;
+    // grouped badges only change (and pop) when a new group starts
+    let pops = ch.group.as_ref().is_none_or(|gr| gr.n == 0 || gr.first == ch.n);
+    let dt = if pops { t_ms - t0 } else { f64::INFINITY };
     let (sc, op) = if (0.0..500.0).contains(&dt) { (lerp(0.86, 1.0, back_out(prog(dt, 0.0, 450.0))), prog(dt, 0.0, 160.0)) } else { (1.0, 1.0) };
     let (w, h) = (img.w as f32, img.h as f32);
     if (sc - 1.0).abs() < 1e-4 && op >= 1.0 {
@@ -324,5 +464,27 @@ pub(crate) fn captions(g: &Gfx, pm: &mut Pixmap, area: Rect, words: &[OutWord], 
             (pal.ink, 0.6)
         };
         tx.draw_word(pm, &blk, wd, x + padx, y + pady, col, op * a2, clip);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cutroom_core::resolve::GroupInfo;
+
+    fn ch(n: usize, kicker: &str, group: Option<GroupInfo>) -> ResolvedChapter {
+        ResolvedChapter { n, title: "T".into(), short: "T".into(), at_ms: 0.0, card: None, kicker: kicker.into(), group }
+    }
+
+    #[test]
+    fn group_kickers() {
+        let g = |n, first, last| Some(GroupInfo { title: "The Easy Tips".into(), n, of: 3, first, last, card: false });
+        assert_eq!(kicker_text(&ch(2, "Tip", g(1, 1, 5)), 10), "TIPS 1\u{2013}5 · 1 / 3");
+        assert_eq!(kicker_text(&ch(4, "Tip", g(2, 4, 4)), 10), "TIP 4 · 2 / 3");
+        assert_eq!(kicker_text(&ch(4, "Steps", g(2, 4, 6)), 10), "STEPS 4\u{2013}6 · 2 / 3");
+        assert_eq!(kicker_text(&ch(4, "", g(3, 8, 10)), 10), "3 / 3");
+        assert_eq!(kicker_text(&ch(0, "Intro", Some(GroupInfo { n: 0, ..Default::default() })), 10), "INTRO");
+        // no group: unchanged
+        assert_eq!(kicker_text(&ch(3, "Tip", None), 10), "TIP 3 OF 10");
     }
 }

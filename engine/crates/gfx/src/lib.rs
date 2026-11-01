@@ -48,13 +48,15 @@ pub struct Theme {
     pub ink: [u8; 3],
     pub muted: [u8; 3],
     pub card: [u8; 3],
+    /// Chapter card look (`output.card_style`; the renderer sets it).
+    pub card_style: cutroom_core::spec::CardStyle,
 }
 
 impl Theme {
     /// Defaults with overrides from the spec's `style:` map (hex colours: accent, canvas, dot,
     /// ink, muted, card; numbers: dot_pitch, drift).
     pub fn from_style(style: &BTreeMap<String, String>) -> Theme {
-        let mut t = Theme { canvas: [0x12; 3], dot: [0x2c; 3], dot_pitch: 40.0, drift_px_s: 2.5, accent: [0xE2, 0x77, 0x4E], ink: [0xF4, 0xF1, 0xEC], muted: [0xA3, 0x9C, 0x91], card: [0x1E, 0x1D, 0x1B] };
+        let mut t = Theme { canvas: [0x12; 3], dot: [0x2c; 3], dot_pitch: 40.0, drift_px_s: 2.5, accent: [0xE2, 0x77, 0x4E], ink: [0xF4, 0xF1, 0xEC], muted: [0xA3, 0x9C, 0x91], card: [0x1E, 0x1D, 0x1B], card_style: Default::default() };
         for (k, v) in style {
             let key = k.trim().to_ascii_lowercase();
             let slot = match key.as_str() {
@@ -198,6 +200,17 @@ impl Gfx {
     /// Persistent step badge in `rect` (px; above the camera tile).
     pub fn badge(&self, pm: &mut Pixmap, rect: Rect, ch: &ResolvedChapter, total: usize, t_ms: f64) {
         chrome::badge(self, pm, rect, ch, total, t_ms);
+    }
+
+    /// A small label (white text on a dark pill) at (x, y) px, top-left anchored. For contact
+    /// sheets and debug output.
+    pub fn label(&self, pm: &mut Pixmap, x: f32, y: f32, size: f32, text: &str) {
+        let tx = self.text();
+        let st = text::Style::new(text::FontId::SemiBold, size);
+        let w = tx.width(st, text);
+        let (padx, pady) = (size * 0.45, size * 0.3);
+        raster::fill_rrect(pm, x, y, w + 2.0 * padx, size + 2.0 * pady, size * 0.35, [12, 12, 12], 0.82);
+        tx.draw_line(pm, st, text, x + padx, y + pady + 0.8 * size, [245, 245, 245], 1.0, IRect::of(pm));
     }
 
     /// Burned-in captions (bottom of the panel or frame).

@@ -138,7 +138,7 @@ fn stage_beats() -> Vec<ResolvedBeat> {
         beat(BeatKind::Number { value: "$10,075".into(), label: Some("per video".into()) }, 1000.0, 5000.0),
         beat(BeatKind::Image { src: "shot.png".into(), caption: Some("A screenshot".into()), highlight: Some([0.1, 0.16, 0.3, 0.24]), source: Some("example.com".into()), proof: None }, 1000.0, 5000.0),
         beat(BeatKind::Image { src: "missing.png".into(), caption: None, highlight: None, source: None, proof: None }, 1000.0, 5000.0),
-        beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Footage".into()), fit: Default::default(), alpha: None, looped: None }, 1000.0, 5000.0),
+        beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Footage".into()), fit: Default::default(), alpha: None, looped: None, fade: None }, 1000.0, 5000.0),
         beat(BeatKind::Code { text: "$ cargo run\n# done".into(), title: Some("Terminal".into()) }, 1000.0, 5000.0),
         beat(BeatKind::Quote { text: "Ship it.".into(), by: Some("Someone".into()) }, 1000.0, 5000.0),
     ]
@@ -234,9 +234,9 @@ fn stage_handles_odd_inputs() {
     // Zero-length beat, a video beat without a frame, a frame of another size, a tiny panel.
     let mut pm = frame();
     g.stage(&mut pm, panel(), &beat(BeatKind::Title { text: "x".into(), kicker: None, sub: None }, 1000.0, 1000.0), 1000.0, None);
-    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None, fit: Default::default(), alpha: None, looped: None }, 0.0, 3000.0), 1500.0, None);
+    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None, fit: Default::default(), alpha: None, looped: None, fade: None }, 0.0, 3000.0), 1500.0, None);
     let odd = Pixmap::new(37, 91).unwrap();
-    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None, fit: Default::default(), alpha: None, looped: None }, 0.0, 3000.0), 1500.0, Some(&odd));
+    g.stage(&mut pm, panel(), &beat(BeatKind::Video { src: "v.mp4".into(), from: None, caption: None, fit: Default::default(), alpha: None, looped: None, fade: None }, 0.0, 3000.0), 1500.0, Some(&odd));
     let tiny = Rect::from_xywh(10.0, 10.0, 40.0, 30.0).unwrap();
     for b in stage_beats() {
         let mut t = frame();
@@ -301,7 +301,7 @@ fn frame_level_overlays_stay_in_frame_and_near_their_spot() {
 #[test]
 fn chapter_card_badge_and_captions() {
     let g = gfx();
-    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 10_000.0, card: Some((10_000.0, 11_800.0)), kicker: "Step".into() };
+    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 10_000.0, card: Some((10_000.0, 11_800.0)), kicker: "Step".into(), group: None };
     for t in [10_000.0, 10_700.0, 11_790.0] {
         let mut a = frame();
         g.chapter_card(&mut a, &ch, 8, t);
@@ -381,14 +381,14 @@ fn higher_resolutions_scale() {
     for b in stage_beats() {
         g.stage(&mut pm, p, &b, 3000.0, None);
     }
-    let ch = ResolvedChapter { n: 1, title: "Intro".into(), short: "Intro".into(), at_ms: 0.0, card: None, kicker: "Step".into() };
+    let ch = ResolvedChapter { n: 1, title: "Intro".into(), short: "Intro".into(), at_ms: 0.0, card: None, kicker: "Step".into(), group: None };
     g.chapter_card(&mut pm, &ch, 4, 500.0);
 }
 
 #[test]
 fn chapter_kicker_follows_output_kicker() {
     let g = gfx();
-    let step = ResolvedChapter { n: 3, title: "Talk instead of typing".into(), short: "Voice".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into() };
+    let step = ResolvedChapter { n: 3, title: "Talk instead of typing".into(), short: "Voice".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into(), group: None };
     let tip = ResolvedChapter { kicker: "Tip".into(), ..step.clone() };
     let none = ResolvedChapter { kicker: String::new(), ..step.clone() };
     let card = |ch: &ResolvedChapter| {
@@ -412,4 +412,47 @@ fn chapter_kicker_follows_output_kicker() {
         assert!(x.data() != y.data() && x.data() != z.data(), "the badge follows the kicker");
         assert_eq!(changed_outside(&z, rect, 0.0), 0);
     }
+}
+
+#[test]
+fn rea_cards_and_grouped_badges() {
+    use cutroom_core::resolve::GroupInfo;
+    let mut th = Theme::from_style(&BTreeMap::new());
+    th.card_style = cutroom_core::spec::CardStyle::Rea;
+    let g = Gfx::new(th, W, H, &assets()).unwrap();
+    let grp = GroupInfo { title: "The Easy Tips".into(), n: 1, of: 3, first: 1, last: 5, card: true };
+    let ch = ResolvedChapter { n: 1, title: "Ask For HTML".into(), short: "HTML".into(), at_ms: 0.0, card: Some((0.0, 1500.0)), kicker: "Tip".into(), group: Some(grp.clone()) };
+    // paper first, then the title's words fade in
+    let mut early = frame();
+    g.chapter_card(&mut early, &ch, 10, 50.0);
+    let mut late = frame();
+    g.chapter_card(&mut late, &ch, 10, 1400.0);
+    let px = |pm: &Pixmap, x: f32, y: f32| pm.pixel((x * W as f32) as u32, (y * H as f32) as u32).unwrap();
+    assert!(px(&early, 0.02, 0.5).red() > 240, "white paper");
+    let centre = Rect::from_xywh(W as f32 * 0.25, H as f32 * 0.4, W as f32 * 0.5, H as f32 * 0.2).unwrap();
+    let dark = |pm: &Pixmap| {
+        let mut n = 0;
+        for y in (centre.top() as u32)..(centre.bottom() as u32) {
+            for x in (centre.left() as u32)..(centre.right() as u32) {
+                if pm.pixel(x, y).unwrap().red() < 60 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert_eq!(dark(&early), 0, "no title before the first word");
+    assert!(dark(&late) > 500, "a black title in the middle");
+    let mut again = frame();
+    g.chapter_card(&mut again, &ch, 10, 1400.0);
+    assert!(again.data() == late.data(), "frame-pure");
+    // grouped badge: differs from the plain one, stays in its rect
+    let rect = Rect::from_xywh(1000.0, 40.0, 236.0, 100.0).unwrap();
+    let plain = ResolvedChapter { group: None, ..ch.clone() };
+    let mut a = frame();
+    g.badge(&mut a, rect, &ch, 10, 20_000.0);
+    let mut b = frame();
+    g.badge(&mut b, rect, &plain, 10, 20_000.0);
+    assert!(a.data() != b.data());
+    assert_eq!(changed_outside(&a, rect, 0.0), 0);
 }

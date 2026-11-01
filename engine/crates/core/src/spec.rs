@@ -74,14 +74,34 @@ pub struct OutputSpec {
     #[serde(default = "d_kicker")]
     pub kicker: String,
     /// Title of the 0:00 line of chapters.txt when the first chapter starts later (YouTube
-    /// chapters must start at 0:00).
+    /// chapters must start at 0:00). With chapter groups it is also the intro badge's title.
     #[serde(default = "d_intro")]
     pub intro: String,
+    /// Chapter card look: `dark` (the canvas card with a big step number and tracker) or `rea`
+    /// (white grid, black title building word by word).
+    #[serde(default)]
+    pub card_style: CardStyle,
+    /// Which chapters get a card: `chapter` (every one), `group` (the first chapter of each
+    /// `group`, showing the group's title), `auto` (group when chapters have groups).
+    #[serde(default)]
+    pub card_on: CardOn,
 }
 
 impl Default for OutputSpec {
     fn default() -> Self {
-        OutputSpec { height: d_height(), fps: d_fps(), chapter_cards: CardMode::default(), card_ms: d_card_ms(), badge: true, captions: false, music: None, kicker: d_kicker(), intro: d_intro() }
+        OutputSpec {
+            height: d_height(),
+            fps: d_fps(),
+            chapter_cards: CardMode::default(),
+            card_ms: d_card_ms(),
+            badge: true,
+            captions: false,
+            music: None,
+            kicker: d_kicker(),
+            intro: d_intro(),
+            card_style: CardStyle::default(),
+            card_on: CardOn::default(),
+        }
     }
 }
 
@@ -157,6 +177,24 @@ pub enum CardMode {
     Insert,
     Overlay,
     Off,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum CardStyle {
+    #[default]
+    Dark,
+    /// White grid card, black title (the REA / tips look).
+    Rea,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CardOn {
+    #[default]
+    Auto,
+    Chapter,
+    Group,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -261,6 +299,10 @@ pub struct ChapterSpec {
     /// Short label for the badge (defaults to the title).
     #[serde(default)]
     pub short: Option<String>,
+    /// The section this chapter belongs to ("The Easy Tips"). With groups the badge shows the
+    /// group ("TIPS 1-5 · 1 / 3" over "The Easy Tips") and cards go on group starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -386,6 +428,11 @@ pub enum BeatKind {
         /// Restart at the end. Default: true for `card`, false otherwise (the last frame holds).
         #[serde(default, rename = "loop")]
         looped: Option<bool>,
+        /// Fade `panel` / `frame` clips in and out (default true). `fade: false` marks a
+        /// frame-exact film: it cuts in and out on the frame and must match its window within 2
+        /// frames (`check` errors otherwise).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fade: Option<bool>,
     },
     /// A code / prompt card that types on.
     Code {
@@ -478,6 +525,13 @@ pub enum Lane {
 }
 
 impl BeatKind {
+    /// A full-frame film (`video` with `fit: frame`, not marked `alpha: true`): it fills the
+    /// picture under the camera tile, so the panel is never empty under it and the camera stays a
+    /// tile. Transparent overlays must say `alpha: true` (they go over whatever is under them).
+    pub fn is_film(&self) -> bool {
+        matches!(self, BeatKind::Video { fit: VideoFit::Frame, alpha, .. } if *alpha != Some(true))
+    }
+
     pub fn lane(&self) -> Lane {
         use BeatKind::*;
         match self {

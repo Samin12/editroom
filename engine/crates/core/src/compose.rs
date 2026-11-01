@@ -63,7 +63,7 @@ pub fn segments(plan: &Plan, src: &Source) -> Vec<Seg> {
         }
     }
     for b in &plan.beats {
-        if matches!(b.lane, Lane::Stage | Lane::Layout) {
+        if matches!(b.lane, Lane::Stage | Lane::Layout) || b.kind.is_film() {
             cuts.push(b.start_ms);
             cuts.push(b.end_ms);
         }
@@ -113,12 +113,14 @@ pub fn segments(plan: &Plan, src: &Source) -> Vec<Seg> {
         let screen = smid.and_then(|s| clip_idx_at(src, Track::Screen, s));
         let camera = smid.and_then(|s| clip_idx_at(src, Track::Camera, s));
         let in_gap = smid.is_none();
-        let empty_panel = !in_gap && requested == LayoutMode::Panel && screen.is_none() && stage.is_none();
+        // an opaque full-frame film fills the picture: nothing is "empty" under it
+        let film = plan.beats.iter().any(|x| x.kind.is_film() && x.start_ms <= mid && mid < x.end_ms);
+        let empty_panel = !in_gap && requested == LayoutMode::Panel && screen.is_none() && stage.is_none() && !film;
         let mut mode = requested;
         if empty_panel && plan.layout.empty_panel == EmptyPanel::Camera {
             mode = LayoutMode::Camera;
         }
-        if mode == LayoutMode::Screen && screen.is_none() && stage.is_none() && !in_gap {
+        if mode == LayoutMode::Screen && screen.is_none() && stage.is_none() && !in_gap && !film {
             mode = LayoutMode::Camera;
         }
         let seg = Seg { out0: a, out1: b, src0, requested, mode, card, stage, screen, camera, empty_panel };

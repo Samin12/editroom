@@ -2,7 +2,7 @@
 
 use crate::anchor::{self, Index, Resolved};
 use crate::model::Source;
-use crate::spec::{Anchor, BeatKind, CardMode, Lane, LayoutSpec, Loaded, OutputSpec};
+use crate::spec::{Anchor, BeatKind, CardMode, CardOn, Lane, LayoutSpec, Loaded, OutputSpec};
 use crate::timemap::TimeMap;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -54,6 +54,24 @@ pub struct ResolvedChapter {
     pub card: Option<(f64, f64)>,
     /// `output.kicker` ("Step", "Tip"; empty hides it on the card and the badge).
     pub kicker: String,
+    /// The chapter's group (`chapters[].group`), when chapters have groups.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<GroupInfo>,
+}
+
+/// A run of consecutive chapters sharing a `group` ("The Easy Tips" = tips 1 to 5).
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+pub struct GroupInfo {
+    pub title: String,
+    /// 1-based place among the groups (0 for the intro badge before the first chapter).
+    pub n: usize,
+    /// Number of groups.
+    pub of: usize,
+    /// First and last chapter number in the group.
+    pub first: usize,
+    pub last: usize,
+    /// This chapter's card is the group's card (it shows the group title).
+    pub card: bool,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -189,7 +207,7 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
     let kept = |i: usize| word_kept.get(i).copied().unwrap_or(false);
 
     // ---- chapters ----
-    let mut ch_src: Vec<(usize, f64, String, String)> = vec![]; // (spec idx, src insert time, title, short)
+    let mut ch_src: Vec<(usize, f64, String, String, Option<String>)> = vec![]; // (spec idx, src insert time, title, short, group)
     for (i, c) in spec.chapters.iter().enumerate() {
         let o = &loaded.chapter_origin[i];
         let sc = scope_of(o, &mut issues);
@@ -210,14 +228,25 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
                         issues.push(Issue { sev: Severity::Error, at_ms: None, msg: format!("{}: chapter {:?} starts on a cut word w{w}", o.file, c.title) });
                     }
                 }
-                ch_src.push((i, t_ins, c.title.clone(), c.short.clone().unwrap_or_else(|| c.title.clone())));
+                let group = c.group.as_ref().map(|g| g.trim().to_string()).filter(|g| !g.is_empty());
+                ch_src.push((i, t_ins, c.title.clone(), c.short.clone().unwrap_or_else(|| c.title.clone()), group));
             }
             Err(e) => issues.push(Issue { sev: Severity::Error, at_ms: None, msg: format!("{}: chapter {:?}: {e}", o.file, c.title) }),
         }
     }
     ch_src.sort_by(|a, b| a.1.total_cmp(&b.1));
+    // groups: runs of consecutive chapters with the same `group`
+    let groups = group_runs(&ch_src.iter().map(|c| c.4.clone()).collect::<Vec<_>>());
+    let grouped = groups.iter().any(|g| g.is_some());
+    let by_group = match spec.output.card_on {
+        CardOn::Auto => grouped,
+        CardOn::Group => true,
+        CardOn::Chapter => false,
+    };
+    // which chapters get a card: every one, or the first of each group
+    let has_card: Vec<bool> = (0..ch_src.len()).map(|n| !by_group || groups[n].as_ref().is_some_and(|g| g.first == n + 1)).collect();
     let inserts: Vec<(f64, f64, usize)> = if spec.output.chapter_cards == CardMode::Insert {
-        ch_src.iter().enumerate().map(|(n, c)| (c.1, spec.output.card_ms, n)).collect()
+        ch_src.iter().enumerate().filter(|(n, _)| has_card[*n]).map(|(n, c)| (c.1, spec.output.card_ms, n)).collect()
     } else {
         vec![]
     };
@@ -228,6 +257,8 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
         .enumerate()
         .map(|(n, c)| {
             let (at_ms, card) = match spec.output.chapter_cards {
+                CardMode::Insert if !has_card[n] => (map.to_out(c.1), None),
+                CardMode::Overlay if !has_card[n] => (map.to_out(c.1), None),
                 CardMode::Insert => {
                     let gap = map.pieces.iter().find_map(|p| match *p {
                         crate::timemap::Piece::Gap { out0, dur, tag } if tag == n => Some((out0, out0 + dur)),
@@ -244,7 +275,11 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
                 }
                 CardMode::Off => (map.to_out(c.1), None),
             };
-            ResolvedChapter { n: n + 1, title: c.2.clone(), short: c.3.clone(), at_ms, card, kicker: spec.output.kicker.trim().to_string() }
+            let group = groups[n].clone().map(|mut g| {
+                g.card = by_group && g.first == n + 1;
+                g
+            });
+            ResolvedChapter { n: n + 1, title: c.2.clone(), short: c.3.clone(), at_ms, card, kicker: spec.output.kicker.trim().to_string(), group }
         })
         .collect();
 
@@ -383,6 +418,27 @@ pub fn build(loaded: &Loaded, src: &Source) -> Plan {
     beats.sort_by(|a, b| a.start_ms.total_cmp(&b.start_ms));
 
     Plan { width, height, fps, output: spec.output.clone(), layout: spec.layout.clone(), style: spec.style.clone(), map, cuts, chapters, beats, words, issues }
+}
+
+/// Group info per chapter (in order): consecutive chapters with the same group form one run.
+/// Chapters without a group get None.
+fn group_runs(groups: &[Option<String>]) -> Vec<Option<GroupInfo>> {
+    let mut runs: Vec<(String, usize, usize)> = vec![]; // (title, first idx, last idx)
+    for (i, g) in groups.iter().enumerate() {
+        let Some(g) = g else { continue };
+        match runs.last_mut() {
+            Some(r) if r.0 == *g && r.2 + 1 == i => r.2 = i,
+            _ => runs.push((g.clone(), i, i)),
+        }
+    }
+    let of = runs.len();
+    let mut out = vec![None; groups.len()];
+    for (k, (title, a, b)) in runs.iter().enumerate() {
+        for slot in out.iter_mut().take(b + 1).skip(*a) {
+            *slot = Some(GroupInfo { title: title.clone(), n: k + 1, of, first: a + 1, last: b + 1, card: false });
+        }
+    }
+    out
 }
 
 fn anchor_src(r: &Resolved, src: &Source) -> Option<f64> {

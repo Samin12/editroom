@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
         ("bullets", bullets),
         ("number", beat(BeatKind::Number { value: "$10,075".into(), label: Some("paid for one video".into()) }, 0.0, 3500.0)),
         ("image", beat(BeatKind::Image { src: "shot.png".into(), caption: Some("The campaign list".into()), highlight: Some([0.1, 0.1, 0.3, 0.2]), source: Some("launchpoint.app".into()), proof: None }, 0.0, 5000.0)),
-        ("video", beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Real footage".into()), fit: Default::default(), alpha: None, looped: None }, 0.0, 5000.0)),
+        ("video", beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Real footage".into()), fit: Default::default(), alpha: None, looped: None, fade: None }, 0.0, 5000.0)),
         ("code", beat(BeatKind::Code { text: "$ claude mcp add poppy --transport http https://mcp.getpoppy.ai\n# then ask:\n> Find the three best hooks in my last 20 videos.".into(), title: Some("Terminal".into()) }, 0.0, 6000.0)),
         ("quote", beat(BeatKind::Quote { text: "The best time to post was yesterday.".into(), by: Some("Every creator".into()) }, 0.0, 4000.0)),
         ("scene-diag", scene("diagram", 0.0, 7000.0)),
@@ -74,7 +74,7 @@ fn main() -> anyhow::Result<()> {
         ("callout", beat(BeatKind::Callout { text: "This is the number that matters".into(), pos: None }, 0.0, 3000.0)),
         ("lower", beat(BeatKind::Lower { title: "Samin Yasar".into(), sub: Some("Founder, AI Answers".into()) }, 0.0, 4000.0)),
     ];
-    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into() };
+    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into(), group: None };
 
     println!("{:<12} {:>10} {:>10} {:>10} {:>10}", "item", "1080p ms", "(cold)", "2160p ms", "(cold)");
     let mut rows: Vec<(String, [(f64, f64); 2])> = vec![];
