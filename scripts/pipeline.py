@@ -36,6 +36,11 @@ STAGES = ["ingest", "setup", "analyze", "proofs", "drop", "check", "sheet", "ren
 GATE_PROOFS, GATE_CHECK, GATE_REVIEW = 10, 11, 12
 
 
+def clock(s):
+    h, m = int(s // 3600), int(s % 3600 // 60)
+    return f"{h}:{m:02d}:{s % 60:04.1f}" if h else f"{m}:{s % 60:04.1f}"
+
+
 def now():
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -297,10 +302,14 @@ def auto_capture(r, reqs):
 
 
 def st_drop(r, proj):
+    """Apply captured proof (highlight + source pill) to its beats, then replace what is still missing."""
+    _, out = r.sh([sys.executable, "-I", os.path.join(HERE, "apply_proofs.py"), r.work], "apply-proofs")
+    applied = out.strip().splitlines()[-1] if out.strip() else ""
     if not r.supports("proofs", "--drop-missing"):
-        return "engine has no `proofs --drop-missing` yet: skipped"
+        return f"{applied}; engine has no `proofs --drop-missing` yet"
     _, out = r.sh([r.cut, "proofs", r.work, "--drop-missing"], "drop")
-    return out.strip().splitlines()[-1] if out.strip() else ""
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    return f"{applied}; {last}"
 
 
 def st_check(r, proj):
@@ -323,15 +332,23 @@ def st_sheet(r, proj):
         r.sh([r.cut, "sheet", r.work, "--at", "o:...", "--cols", "4", "-o", os.path.join(review, "sheet-01.png")])
         return ""
     os.makedirs(review, exist_ok=True)
-    for old in glob.glob(os.path.join(review, "sheet-*.png")):
+    for old in glob.glob(os.path.join(review, "sheet-*")):
         os.remove(old)
     _, out = r.sh([r.cut, "plan", r.work], "plan")
-    plan = json.loads(out)
-    marks = [((b["start_ms"] + b["end_ms"]) / 2, b.get("kind")) for b in plan.get("beats", []) if b.get("kind") != "blur"]
-    marks += [((c["card"][0] + c["card"][1]) / 2, "card") for c in plan.get("chapters", []) if c.get("card")]
+    plan = json.loads(out[out.index("{"):])
+
+    def label(b):
+        txt = b.get("text") or b.get("title") or b.get("value") or b.get("label") or b.get("src") or ""
+        if not txt and b.get("items"):
+            txt = "; ".join(i if isinstance(i, str) else i.get("text", "") for i in b["items"])
+        return f"{b.get('kind')}: {str(txt)[:90]}  ({b.get('origin', '')})"
+
+    marks = [((b["start_ms"] + b["end_ms"]) / 2, label(b)) for b in plan.get("beats", []) if b.get("kind") != "blur"]
+    marks += [((c["card"][0] + c["card"][1]) / 2, f"chapter card {c.get('n')}: {c.get('title')}")
+              for c in plan.get("chapters", []) if c.get("card")]
     marks.sort()
     if not marks:
-        _, _ = r.sh([r.cut, "sheet", r.work, "--every", "30", "-o", os.path.join(review, "sheet-01.png")], "sheet")
+        r.sh([r.cut, "sheet", r.work, "--every", "30", "-o", os.path.join(review, "sheet-01.png")], "sheet")
         n = 1
     else:
         chunks = [marks[i:i + 20] for i in range(0, len(marks), 20)]
@@ -339,8 +356,12 @@ def st_sheet(r, proj):
         for i, ch in enumerate(chunks, 1):
             at = ",".join(f"o:{ms / 1000:.2f}" for ms, _ in ch)
             jobs.append([r.cut, "sheet", r.work, "--at", at, "--cols", "4", "-o", os.path.join(review, f"sheet-{i:02d}.png")])
+            with open(os.path.join(review, f"sheet-{i:02d}.md"), "w") as f:
+                f.write(f"# sheet-{i:02d}.png: frames left to right, top to bottom (4 per row)\n\n")
+                for k, (ms, lab) in enumerate(ch, 1):
+                    f.write(f"{k}. o:{ms / 1000:.2f} ({clock(ms / 1000)}) {lab}\n")
         with cf.ThreadPoolExecutor(min(4, len(jobs))) as ex:
-            list(ex.map(lambda j: r.sh(j, f"sheet-{jobs.index(j) + 1:02d}"), jobs))
+            list(ex.map(lambda j: r.sh(j, os.path.basename(j[-1])[:-4]), jobs))
         n = len(jobs)
     if r.a.no_review:
         return f"{n} sheets (review skipped)"
@@ -397,6 +418,9 @@ def st_report(r, proj):
         p = video[:-4] + ext if video else ""
         if p and os.path.exists(p):
             lines.append(f"- {label}: `{p}`")
+    chap = video[:-4] + ".chapters.txt" if video else ""
+    if chap and os.path.exists(chap):
+        lines += ["", "## YouTube chapters", "", "```", open(chap).read().strip(), "```"]
     lines += ["", "## Numbers", "", "```", stats.strip(), "```"]
     priv = os.path.join(w, "privacy.json")
     if os.path.exists(priv):
@@ -404,20 +428,22 @@ def st_report(r, proj):
         kinds = {}
         for f in found:
             kinds[f.get("kind", "?")] = kinds.get(f.get("kind", "?"), 0) + 1
-        lines += ["", f"## Privacy: {len(found)} findings blurred", ""] + [f"- {k}: {n}" for k, n in sorted(kinds.items())]
+        lines += ["", f"## Privacy: {len(found)} finding{'s' if len(found) != 1 else ''} blurred", ""] + [f"- {k}: {n}" for k, n in sorted(kinds.items())]
     dropped = os.path.join(w, "agent", "dropped.yaml")
     if os.path.exists(dropped):
         lines += ["", "## Beats the agent dropped (failed checks twice)", "", "```yaml", open(dropped).read().strip()[:4000], "```"]
-    src = os.path.join(w, "proof", "sources.json")
-    if os.path.exists(src):
+    rows = []
+    for p in sorted(glob.glob(os.path.join(w, "proof", "*.source.json"))):
         try:
-            rows = json.load(open(src))
-            lines += ["", f"## Proof: {len(rows)} captures", ""]
-            for s in rows:
-                flag = f"  **FLAG:** {s['flag']}" if s.get("flag") else ""
-                lines.append(f"- `{s.get('file', '?')}`: {s.get('claim', '')} ({s.get('url', '')}, {s.get('verdict', '?')}){flag}")
-        except (ValueError, KeyError):
+            rows.append(json.load(open(p)))
+        except ValueError:
             pass
+    if rows:
+        flagged = [x for x in rows if x.get("flag")]
+        lines += ["", f"## Proof: {len(rows)} captures, {len(flagged)} flags", ""]
+        for x in rows:
+            flag = f"  **FLAG:** {x['flag']}" if x.get("flag") else ""
+            lines.append(f"- `{x.get('src', '?')}` ({x.get('verdict', '?')}): {x.get('claim', '')} <{x.get('url', '')}>{flag}")
     qa = os.path.join(w, "qa.md")
     if os.path.exists(qa):
         lines += ["", open(qa).read().strip()]
