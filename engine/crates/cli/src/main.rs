@@ -12,6 +12,12 @@
 //!   cutroom stats <dir>                                 sizes, durations, token footprint
 //!   cutroom agent <dir>                                 editorial cuts, chapters, visuals, screen marks (Claude, parallel)
 //!   cutroom proofs <dir> [--drop-missing]               proof screenshots still to capture (JSON)
+//!   cutroom slots <dir> [--json]                        sections as frame-exact slots for pre-rendered films
+//!   cutroom timing <dir> --slot ch03 [--json]           kept words in a slot's frame clock
+//!   cutroom boxes <png> --phrase "..." [--json]         glyph boxes of a phrase in a screenshot
+//!   cutroom check-render <film> --work <dir> --slot ch03  frame count, empty panel, holds, tile/badge clear
+//!   cutroom sheet-video <film> --every 2 -o s.png       contact sheet of a render (alpha over the canvas)
+//!   cutroom canvas --at 12.5 -o c.png                   the dot-grid canvas at an output time
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -26,6 +32,7 @@ use std::time::Instant;
 
 mod agent;
 mod proofs;
+mod studio;
 
 #[derive(Parser)]
 #[command(name = "cutroom", version, about = "Agentic video editor engine: word-anchored edits, native motion graphics, parallel render")]
@@ -202,6 +209,98 @@ enum Cmd {
         /// Turn each still-missing proof into a title / quote / callout with its claim, or remove it.
         #[arg(long)]
         drop_missing: bool,
+    },
+    /// Sections (intro + one per chapter) as frame-exact slots in OUTPUT time, for films rendered
+    /// elsewhere and dropped in as `video` beats. Prints the beat line that places each.
+    Slots {
+        dir: PathBuf,
+        #[arg(long)]
+        json: bool,
+        /// Film path for the beat lines (`{id}` = slot id).
+        #[arg(long, default_value = "studio/films/{id}.mp4")]
+        src: String,
+    },
+    /// Kept words of a slot (or a stretch) with output ms and frame numbers in the slot's clock.
+    Timing {
+        dir: PathBuf,
+        #[arg(long)]
+        slot: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        /// One line per word instead of per sentence.
+        #[arg(long)]
+        words: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Glyph boxes of a phrase in an image (tesseract), image-normalized and in pixels.
+    Boxes {
+        image: PathBuf,
+        #[arg(long)]
+        phrase: String,
+        /// Every match (default: the best one).
+        #[arg(long)]
+        all: bool,
+        /// Grow each box by this many image pixels.
+        #[arg(long, default_value_t = 0.0)]
+        pad: f32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Contact sheet of a rendered video (transparency shown over the canvas).
+    SheetVideo {
+        video: PathBuf,
+        /// Times: seconds, `f<frame>` or `m:ss.s`, comma separated.
+        #[arg(long)]
+        at: Option<String>,
+        /// One frame every N seconds.
+        #[arg(long)]
+        every: Option<f64>,
+        #[arg(long, default_value_t = 4)]
+        cols: u32,
+        #[arg(long, default_value_t = 480)]
+        width: u32,
+        /// Work dir whose `style` (canvas colours) to use.
+        #[arg(long)]
+        work: Option<PathBuf>,
+        #[arg(short, long)]
+        out: PathBuf,
+    },
+    /// Mechanical checks of a rendered film: frame count vs its slot, empty panel, black dips,
+    /// static holds, content under the camera tile or badge, overlay coverage, beat leads.
+    CheckRender {
+        video: PathBuf,
+        /// The edit the film is for.
+        #[arg(long)]
+        work: Option<PathBuf>,
+        #[arg(long)]
+        slot: Option<String>,
+        /// job.json with `beats: [{f, word}]` to check each beat's lead before its word.
+        #[arg(long)]
+        job: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+        /// Also write the markdown report here.
+        #[arg(long)]
+        md: Option<PathBuf>,
+    },
+    /// The dot-grid canvas at an output time, as a PNG (to match films to it pixel for pixel).
+    Canvas {
+        /// Output seconds (or o:12.5).
+        #[arg(long, default_value = "0")]
+        at: String,
+        /// Work dir whose `style` to use.
+        #[arg(long)]
+        work: Option<PathBuf>,
+        #[arg(long, default_value_t = 1080)]
+        height: u32,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Print the canvas parameters as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -404,7 +503,8 @@ fn main() -> Result<()> {
         Cmd::Check { dir, verbose } => {
             let p = open(&dir, None)?;
             let segs = segments(&p.plan, &p.src);
-            let issues = lint::check(&p.plan, &p.src, &segs, &p.loaded.dir, &findings(&dir));
+            let mut issues = lint::check(&p.plan, &p.src, &segs, &p.loaded.dir, &findings(&dir));
+            issues.extend(cutroom_render::film_issues(&p.plan, &p.loaded.dir));
             let shown: Vec<_> = issues.iter().filter(|i| verbose || i.sev != resolve::Severity::Info).cloned().collect();
             print!("{}", lint::format(&shown));
             let n = |s: resolve::Severity| issues.iter().filter(|i| i.sev == s).count();
@@ -478,7 +578,8 @@ fn main() -> Result<()> {
         Cmd::Render { dir, out, jobs, codec, height, from, to, no_audio, loudnorm, system_gain, no_music, force, hw } => {
             let p = open(&dir, height)?;
             let segs = segments(&p.plan, &p.src);
-            let issues = lint::check(&p.plan, &p.src, &segs, &p.loaded.dir, &findings(&dir));
+            let mut issues = lint::check(&p.plan, &p.src, &segs, &p.loaded.dir, &findings(&dir));
+            issues.extend(cutroom_render::film_issues(&p.plan, &p.loaded.dir));
             let errors: Vec<_> = issues.iter().filter(|i| i.sev == resolve::Severity::Error).cloned().collect();
             if !errors.is_empty() && !force {
                 print!("{}", lint::format(&errors));
@@ -548,6 +649,123 @@ fn main() -> Result<()> {
                 }
             } else {
                 println!("{}", serde_json::to_string_pretty(&proofs::pending(&dir)?)?);
+            }
+        }
+        Cmd::Slots { dir, json, src } => {
+            let p = open(&dir, None)?;
+            let segs = segments(&p.plan, &p.src);
+            let s = studio::slots(&p, &segs, &src);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&s)?);
+            } else {
+                print!("{}", studio::slots_text(&s));
+            }
+        }
+        Cmd::Timing { dir, slot, from, to, words, json } => {
+            let p = open(&dir, None)?;
+            let segs = segments(&p.plan, &p.src);
+            let t = match slot {
+                Some(id) => {
+                    let all = studio::slots(&p, &segs, "");
+                    let s = all.slots.iter().find(|s| s.id == id).ok_or_else(|| anyhow!("no slot {id:?} (have: {})", all.slots.iter().map(|s| s.id.as_str()).collect::<Vec<_>>().join(", ")))?;
+                    studio::timing(&p, &segs, Some(s), None)?
+                }
+                None => {
+                    let (Some(a), Some(b)) = (&from, &to) else { bail!("give --slot or both --from and --to") };
+                    let a_ms = out_time(&p, a)?;
+                    // --to includes its word: its end
+                    let b_ms = match word_index(&p, b) {
+                        Ok(w) => p.plan.map.to_out(p.src.words[w].end_ms),
+                        Err(_) => out_time(&p, b)?,
+                    };
+                    studio::timing(&p, &segs, None, Some((a_ms, b_ms)))?
+                }
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&t)?);
+            } else {
+                print!("{}", studio::timing_text(&t, words));
+            }
+        }
+        Cmd::Boxes { image, phrase, all, pad, json } => {
+            let b = cutroom_privacy::boxes::find(&image, &phrase, all, pad)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&b)?);
+            } else {
+                if b.matches.is_empty() {
+                    println!("{:?} not found in {} ({}x{})", phrase, image.display(), b.width, b.height);
+                    std::process::exit(1);
+                }
+                for m in &b.matches {
+                    let f = |r: [f64; 4]| format!("[{:.4}, {:.4}, {:.4}, {:.4}]", r[0], r[1], r[2], r[3]);
+                    println!("{} {:?} norm {} px [{:.0}, {:.0}, {:.0}, {:.0}] conf {:.0}{}", if m.exact { "exact" } else { "fuzzy" }, m.text, f(m.norm), m.px[0], m.px[1], m.px[2], m.px[3], m.conf, if m.lines.len() > 1 { format!(" ({} lines)", m.lines.len()) } else { String::new() });
+                }
+            }
+        }
+        Cmd::SheetVideo { video, at, every, cols, width, work, out } => {
+            let (_, _, fps, _) = cutroom_render::feed::probe(&video)?;
+            let mut times = vec![];
+            if let Some(a) = at {
+                times.extend(studio::parse_times(&a, fps)?);
+            }
+            if let Some(e) = every {
+                times.extend(studio::every(&video, e)?);
+            }
+            if times.is_empty() {
+                bail!("give --at or --every");
+            }
+            let theme = match &work {
+                Some(d) => cutroom_gfx::Theme::from_style(&open(d, None)?.plan.style),
+                None => cutroom_gfx::Theme::from_style(&Default::default()),
+            };
+            let pm = studio::sheet_video(&video, &times, cols, width, theme)?;
+            cutroom_render::save_png(&pm, &out)?;
+            println!("{} ({} frames)", out.display(), times.len());
+        }
+        Cmd::CheckRender { video, work, slot, job, json, md } => {
+            let proj = work.as_ref().map(|d| open(d, None)).transpose()?;
+            let segs = proj.as_ref().map(|p| segments(&p.plan, &p.src)).unwrap_or_default();
+            let all = proj.as_ref().map(|p| studio::slots(p, &segs, ""));
+            let s = match (&slot, &all) {
+                (Some(id), Some(a)) => Some(a.slots.iter().find(|s| &s.id == id).ok_or_else(|| anyhow!("no slot {id:?}"))?),
+                (Some(_), None) => bail!("--slot needs --work"),
+                _ => None,
+            };
+            let t = match (&proj, s) {
+                (Some(p), Some(s)) => Some(studio::timing(p, &segs, Some(s), None)?),
+                _ => None,
+            };
+            let c = studio::check_render(&video, &studio::CheckOpts { slot: s, plan: proj.as_ref().map(|p| &p.plan), job, timing: t.as_ref() })?;
+            let text = studio::check_text(&c);
+            if let Some(m) = md {
+                std::fs::write(&m, &text)?;
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&c)?);
+            } else {
+                print!("{text}");
+            }
+            if !c.ok {
+                std::process::exit(1);
+            }
+        }
+        Cmd::Canvas { at, work, height, out, json } => {
+            let style = match &work {
+                Some(d) => open(d, None)?.plan.style,
+                None => Default::default(),
+            };
+            let theme = cutroom_gfx::Theme::from_style(&style);
+            let w = ((height as f64 * 16.0 / 9.0) / 2.0).round() as u32 * 2;
+            let secs: f64 = at.trim_start_matches("o:").parse().context("--at: output seconds")?;
+            if json {
+                let mut plan_like = serde_json::to_value(studio::canvas_info_for(&style, height))?;
+                plan_like["at_s"] = serde_json::json!(secs);
+                plan_like["offset_px"] = serde_json::json!((theme.drift_px_s as f64 * height as f64 / 1080.0 * secs) % ((theme.dot_pitch as f64 * height as f64 / 1080.0).round().max(4.0)));
+                println!("{}", serde_json::to_string_pretty(&plan_like)?);
+            }
+            if let Some(o) = out {
+                studio::canvas_png(theme, w, height, secs * 1000.0, &o)?;
+                println!("{}", o.display());
             }
         }
         Cmd::Stats { dir } => {
