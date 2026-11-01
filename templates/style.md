@@ -38,3 +38,5 @@ Names (correct spellings; speech-to-text gets these wrong, and on-screen text mu
 - Hermes, Codex, T3 Code, ChatGPT, OpenAI
 - Borumi, Poppy, Heptabase, Higgsfield, Composio
 - Skool, Claude Club, AI Answers
+- Boris Cherny (made Claude Code), Andrej Karpathy, SuperWhisper, Wispr Flow (never "Whisperflow")
+- SceneForge, Creator Club, cutroom, editroom
