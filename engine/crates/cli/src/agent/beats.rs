@@ -63,6 +63,22 @@ pub fn resolved(base: &Loaded, src: &Source, file: &str, spec: &Spec) -> Vec<Opt
     out
 }
 
+/// Chapters closer together than this are one topic split in two.
+pub const MIN_CHAPTER_MS: f64 = 45_000.0;
+
+pub fn chapter_gap_errors(base: &Loaded, src: &Source, file: &str, spec: &Spec) -> Vec<String> {
+    if spec.chapters.len() < 2 {
+        return vec![];
+    }
+    let (l, _) = with_file(base, file, spec);
+    let plan = resolve::build(&l, src);
+    plan.chapters
+        .windows(2)
+        .filter(|w| w[1].at_ms - w[0].at_ms < MIN_CHAPTER_MS)
+        .map(|w| format!("chapters {:?} and {:?} are only {:.0}s apart: merge them (a chapter is a real topic, usually minutes long)", w[0].title, w[1].title, (w[1].at_ms - w[0].at_ms) / 1000.0))
+        .collect()
+}
+
 /// Stage beats anchored on a [screen] line would cover his screen.
 pub fn screen_line_errors(c: &Ctx, spec: &Spec) -> Vec<String> {
     let mut out = vec![];

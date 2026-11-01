@@ -345,3 +345,43 @@ fn par_map_keeps_order() {
     let v = llm::par_map((0..50).collect::<Vec<_>>(), 7, |x| x * 2);
     assert_eq!(v, (0..50).map(|x| x * 2).collect::<Vec<_>>());
 }
+
+#[test]
+fn screen_marks_snap_to_kept_words_and_stay_small() {
+    let src = source(TEXT);
+    let dir = work("snap", &src);
+    // cut w33-w34 so an anchor there has to move
+    std::fs::write(dir.join("cuts.yaml"), "cuts:\n  - {from: w33, to: w34}\n").unwrap();
+    let (src, plan) = plan_of(&dir);
+    let c = Ctx::new(&src, &plan);
+    let w = screen::Window { k: 0, lo: c.pos_at_or_after(25), hi: c.kept.len(), frames: vec![] };
+    let mk = |y: &str| -> (spec::BeatSpec, String) { (serde_yaml::from_str(y).unwrap(), y.to_string()) };
+    let (ok, bad) = screen::check_marks(
+        &c,
+        &w,
+        vec![
+            mk("{at: w33, until: w34, kind: ring, rect: [0.6, 0.1, 0.2, 0.1]}"),
+            mk("{at: w30, until: w44, kind: highlight, rect: [0.1, 0.1, 0.5, 0.05]}"),
+            mk("{at: w31, kind: ring, rect: [0.1, 0.1, 0.7, 0.7]}"),
+            mk("{at: w32, kind: highlight, rect: [0.1, 0.1, 0.5, 0.5]}"),
+        ],
+    );
+    assert_eq!(bad.len(), 2, "{bad:?}");
+    assert_eq!(ok[0].at.0, "w35", "a cut start word moves forward");
+    assert!(ok[0].until.is_none(), "an end before the start is dropped");
+    assert_eq!(ok[1].until.as_ref().unwrap().0, format!("w{}", c.kept[w.hi - 1]), "an end past the stretch moves back");
+}
+
+#[test]
+fn micro_cuts_are_left_out() {
+    let mut src = source(TEXT);
+    // w20 is a 200 ms word
+    src.words[20].end_ms = src.words[20].start_ms + 200.0;
+    let dir = work("micro", &src);
+    let (src, plan) = plan_of(&dir);
+    let c = Ctx::new(&src, &plan);
+    let ch = editorial::chunks(&c.kept, 1500, 225).remove(0);
+    let r = editorial::validate("cuts:\n  - {from: w20, to: w20, why: filler}\n  - {from: w21, to: w22, why: filler}\n", &ch, &c, &CutReport::default(), &normw(&src));
+    assert_eq!(r.cuts.iter().map(|x| x.from).collect::<Vec<_>>(), vec![21]);
+    assert!(r.errors.is_empty());
+}

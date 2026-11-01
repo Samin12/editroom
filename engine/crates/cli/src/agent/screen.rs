@@ -118,9 +118,25 @@ pub fn prompt(c: &Ctx, w: &Window) -> String {
     s
 }
 
-fn in_window(c: &Ctx, w: &Window, a: &str) -> bool {
-    let Some(id) = a.trim().strip_prefix('w').and_then(|x| x.parse::<usize>().ok()) else { return false };
-    id >= c.kept[w.lo] && id <= c.kept[w.hi - 1] && c.pos.get(id).map(|p| p.is_some()).unwrap_or(false)
+fn word_of(a: &str) -> Option<usize> {
+    a.trim().strip_prefix('w').and_then(|x| x.parse::<usize>().ok())
+}
+
+/// A kept word of the window for an anchor the model gave: itself when kept and inside, else the
+/// nearest kept word inside the window (forward for a start, backward for an end), when it is
+/// at most 8 words away.
+fn snap_word(c: &Ctx, w: &Window, id: usize, forward: bool) -> Option<usize> {
+    let (lo, hi) = (c.kept[w.lo], c.kept[w.hi - 1]);
+    if id + 8 < lo || id > hi + 8 {
+        return None;
+    }
+    let id = id.clamp(lo, hi);
+    let p = match c.pos[id] {
+        Some(p) => p,
+        None if forward => c.pos_at_or_after(id).min(w.hi - 1),
+        None => c.pos_at_or_after(id).saturating_sub(1).max(w.lo),
+    };
+    Some(c.kept[p])
 }
 
 fn rect_ok(r: &[f64; 4]) -> bool {
@@ -131,18 +147,29 @@ fn rect_ok(r: &[f64; 4]) -> bool {
 pub fn check_marks(c: &Ctx, w: &Window, beats: Vec<(BeatSpec, String)>) -> (Vec<BeatSpec>, Vec<(String, String)>) {
     let mut keep = vec![];
     let mut bad = vec![];
-    for (b, raw) in beats {
+    for (mut b, raw) in beats {
+        // anchors on a word that was cut, or just outside the stretch, move to the nearest kept word
+        let at = word_of(&b.at.0).and_then(|id| snap_word(c, w, id, true));
+        let until = b.until.as_ref().map(|u| word_of(&u.0).and_then(|id| snap_word(c, w, id, false)));
+        if let Some(a) = at {
+            b.at = cutroom_core::spec::Anchor(format!("w{a}"));
+        }
+        match until {
+            Some(Some(u)) if Some(u) > at => b.until = Some(cutroom_core::spec::Anchor(format!("w{u}"))),
+            Some(_) => b.until = None,
+            None => {}
+        }
         let why = match &b.kind {
             BeatKind::Ring { rect } | BeatKind::Highlight { rect, .. } if !rect_ok(rect) => Some("rect outside the frame or too small".to_string()),
+            BeatKind::Ring { rect } if rect[2] > 0.6 || rect[3] > 0.6 => Some("ring larger than 0.6 of the frame: circle one thing".into()),
+            BeatKind::Highlight { rect, .. } if rect[3] > 0.15 => Some("highlight taller than 0.15: mark a line or two of text".into()),
             BeatKind::Zoom { rect } if !rect_ok(rect) || rect[2] < 0.25 || rect[3] < 0.2 => Some("zoom rect must be inside the frame and at least 0.25 x 0.2".into()),
             BeatKind::Arrow { from, to } if from.iter().chain(to).any(|v| !(0.0..=1.0).contains(v)) => Some("arrow points outside the frame".into()),
             BeatKind::Callout { text, .. } if text.split_whitespace().count() > 6 => Some("callout longer than 6 words".into()),
             BeatKind::Ring { .. } | BeatKind::Highlight { .. } | BeatKind::Zoom { .. } | BeatKind::Arrow { .. } | BeatKind::Callout { .. } => None,
             k => Some(format!("{} is not a screen mark", k.name())),
         };
-        let why = why.or_else(|| (!in_window(c, w, &b.at.0)).then(|| format!("at {} is not a kept word of this stretch", b.at.0))).or_else(|| {
-            b.until.as_ref().filter(|u| !in_window(c, w, &u.0)).map(|u| format!("until {} is not a kept word of this stretch", u.0))
-        });
+        let why = why.or_else(|| at.is_none().then(|| format!("at {} is not near a kept word of this stretch", b.at.0)));
         match why {
             Some(y) => bad.push((raw, y)),
             None if keep.len() >= MAX_PER_WINDOW => bad.push((raw, format!("more than {MAX_PER_WINDOW} marks in one stretch"))),

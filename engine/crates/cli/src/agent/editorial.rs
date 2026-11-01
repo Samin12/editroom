@@ -12,6 +12,9 @@ pub const WHYS: [&str; 7] = ["retake", "false_start", "abandoned", "repeat", "se
 /// Longest single cut (source ms), and the longest for a retake / section restart.
 pub const MAX_CUT_MS: f64 = 90_000.0;
 pub const MAX_RETAKE_MS: f64 = 300_000.0;
+/// Shorter cuts are left out: a jump cut on a visible face for a fraction of a second costs more
+/// than the word it removes (Samin's policy: no removal under 300 ms).
+pub const MIN_CUT_MS: f64 = 300.0;
 /// Most of a chunk's kept words one answer may remove.
 pub const MAX_SHARE: f64 = 0.5;
 
@@ -209,6 +212,9 @@ pub fn validate(ans: &str, ch: &Chunk, c: &Ctx, report: &CutReport, norm_words: 
             let max = if why == "retake" || why == "section_restart" { MAX_RETAKE_MS } else { MAX_CUT_MS };
             if dur > max {
                 r.errors.push(format!("cut w{a}-w{b} ({}) removes {:.0}s; a single cut may remove at most {:.0}s (split it, or it is not one retake)", why, dur / 1000.0, max / 1000.0));
+                continue;
+            }
+            if dur < MIN_CUT_MS {
                 continue;
             }
             let kept_inside: Vec<usize> = (a..=b).filter(|&i| c.pos[i].is_some()).collect();

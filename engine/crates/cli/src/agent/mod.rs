@@ -190,6 +190,7 @@ fn write_validated(llm: &Llm, model: &str, prompt: &str, dir: &Path, file: &str,
             sp.scope = scope.clone();
         }
         let mut errs = beats::issues_for(base, src, file, &sp);
+        errs.extend(beats::chapter_gap_errors(base, src, file, &sp));
         if let Some(c) = c {
             errs.extend(beats::screen_line_errors(c, &sp));
         }
