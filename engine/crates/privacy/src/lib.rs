@@ -10,6 +10,7 @@
 //! Values are never kept: findings carry a redacted preview (`sk-ant...`, `ja***@e***`), and frames
 //! go to tesseract over a pipe, never to disk.
 
+pub mod boxes;
 mod detect;
 mod frames;
 mod ocr;
