@@ -107,12 +107,40 @@ Anchors: `w123` (word id from `cutroom brief`), `"a phrase"` (`#2` for the secon
 | `bullets` | list, items appear as he says them | `highlight` | marker/underline on screen text |
 | `number` | big stat that counts up | `arrow` | point at something on screen |
 | `image` | proof screenshot, push-in, highlight | `callout` | short pill |
-| `video` | real footage / b-roll in the panel | `lower` | lower-third |
+| `video` | footage / b-roll / a pre-rendered animation (`fit: card\|panel\|frame`, `alpha`, `loop`) | `lower` | lower-third |
 | `code` | prompt or command typing on | `blur` | hide private info (mosaic) |
 | `quote` | quote card | `zoom` | push into part of the screen |
 | | | `layout` | panel / screen / camera for a stretch |
 
 `*word*` in title, bullets and quote text is drawn in the accent colour.
+
+### Video beats: fit, transparency, loop
+
+```yaml
+- {at: w800, until: w860, kind: video, src: clips/hero.mov, fit: frame}          # full frame, under the camera tile
+- {at: w900, hold: 6s, kind: video, src: broll/desk.mp4, fit: panel}           # fills the panel slot
+- {at: w950, kind: video, src: broll/wave.mp4, caption: "Real footage"}        # card (default)
+```
+
+- `fit: card` (default) plays the clip on a card in the panel, with an optional caption.
+  `panel` fills the panel slot like the screen recording. `frame` covers the whole frame above
+  the screen and stage, below the camera tile and badge; the panel underneath keeps playing, so
+  a transparent clip (lower third, sticker, Remotion overlay) sits on top of the real footage.
+- `alpha`: ProRes 4444 and HEVC-with-alpha `.mov` keep their transparency. Frames are
+  premultiplied before scaling, so edges never fringe. Detected from the file when omitted
+  (`alpha: false` forces opaque). On a card, transparent areas show the card colour.
+- `loop`: default true for `card`, false otherwise; a clip that ends before the beat holds its
+  last frame. `panel` and `frame` clips fade in and out over 180 ms.
+
+### Music bed
+
+```yaml
+output: {height: 1080, music: {src: music/bed.mp3, gain_db: -18, duck_db: 12}}
+```
+
+Loops under the whole video, ducks under the narration, fades in and out, and is mixed before
+`--loudnorm`. Details and the narration fallback (mic, else camera audio, else system audio):
+[docs/AUDIO.md](docs/AUDIO.md).
 
 ## Privacy
 
@@ -122,6 +150,10 @@ tokens), phone numbers and card numbers. Findings are stored redacted (`sk-ab1..
 into blur beats anchored to source time. `check` reports any finding that would be visible
 unblurred in the output as an error, and `render` refuses to run until it is fixed (`--force` to
 override).
+
+Project-specific patterns (a paid community's price, invoice numbers) go in
+`work/privacy-rules.yaml` or `--pattern name=regex`; they are found, blurred and enforced like
+the built-in kinds. See [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## Install
 
@@ -151,7 +183,8 @@ cp -r skill ~/.claude/skills/cutroom      # optional: drive it from Claude Code
   (titles, lists, numbers, code, quotes, callouts). Rings, highlights and zooms need a look at a
   `still` first (Claude Code with the skill can do that).
 - Visuals are templates. Bespoke animation still has to be made elsewhere and dropped in as a
-  `video` beat.
+  `video` beat (`fit: frame` with a transparent ProRes 4444 / HEVC-alpha clip sits over the
+  footage).
 - About 30% of what a human editor cuts is editorial (dropping content that is never re-said);
   the detector leaves those to the model or the human.
 - Output goes straight to a video file. Nothing is written back into Borumi.
