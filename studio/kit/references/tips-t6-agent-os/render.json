@@ -1,0 +1,5 @@
+{
+  "version": 3,
+  "notes": "v3 (revision round 1): (1) Honcho README card no longer cross-fades through the checklist: it fades out (easing toward the base slot) f2663 to f2673, the checklist brightens only after (f2672 to f2684), and the base slab 'Honcho memory' rises in BELOW slab 1 from f2674 (top edge >= y 810 at every frame, Context bottom y 770), locking at 'system' f2688. (2) Context chips fade f732 to f740, before the tuck (now f740 to f752); the slab name cross-fades between its big and rail spots instead of reflowing past the glyph. (3) Skills / Routines title boxes padded ~10 crop px per side: [28,104,1368,236] / [27,104,1552,236]. (4) h1Out f270 (gone f282), h2In f283 so 'Treat' lands on time. (5) Tail fade + 2% scale-down now f2760 to f2771 (T7a REVISION 2 wording); f2771 and f2772 bare canvas. (6) 'Chat box' label counter-scales during the shrink, ~23.6 final px after it. All other beats, timing and 2773 frames unchanged.",
+  "title": "AI Operating System"
+}

@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "notes": "Tip 4 Agent Handoffs: shared TipOpener with Lingxi Li's X Article (boxes on name, SpaceXAI line, intern, manage; markers on context switching), Boris Cherny's two posts (created Claude Code; agents kicking off agents) with the locked label, a handoff concept diagram on his words, @bot + Terminal-Bench 4.0 rows 1-2 stack, then the named Claude Code / Grok Bot handoff with the grokbot-webhook chip, the @bot reprise inset and the honest closing line. v2: the TipOpener now rises from nothing at f0 (delay 0, was -3), and the closing diagram, skill chip and 'I've stopped being the middleman' caption exit together over f1806-f1815 (gone on f1815) so T5's opener lands on a clean panel.",
+  "title": "Agent Handoffs"
+}

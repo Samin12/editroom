@@ -1,0 +1,17 @@
+{
+ "id": "anim-mvas6emb",
+ "title": "Tip 1 HTML",
+ "mode": "behind",
+ "style": "velour",
+ "background": "solid",
+ "fps": 30,
+ "width": 1920,
+ "height": 1080,
+ "durationInFrames": 2035,
+ "startMs": 37121,
+ "endMs": 104951,
+ "endMsEffective": 104954,
+ "userBrief": "TIP 1 Learn With Interactive HTML (BEHIND, project 37121-104951 ms)",
+ "lastRenderedVersion": 3,
+ "projectName": "tips"
+}

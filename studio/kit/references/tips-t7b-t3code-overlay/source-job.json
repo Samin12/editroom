@@ -1,0 +1,17 @@
+{
+ "id": "anim-mvas6eyk",
+ "title": "T3 Code demo",
+ "mode": "front",
+ "style": "velour",
+ "background": "transparent",
+ "fps": 30,
+ "width": 1920,
+ "height": 1080,
+ "durationInFrames": 3038,
+ "startMs": 527011,
+ "endMs": 628266,
+ "endMsEffective": 628278,
+ "userBrief": "TIP 7 T3 Code demo (FRONT callouts) (FRONT, project 527011-628266 ms)",
+ "lastRenderedVersion": 2,
+ "projectName": "tips"
+}

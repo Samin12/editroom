@@ -1,0 +1,8 @@
+node_modules/
+src/entries/
+src/jobs/*/
+public/jobs/
+public/refs/
+out/
+*.tsbuildinfo
+tsconfig.job-*.json

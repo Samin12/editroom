@@ -1,0 +1,17 @@
+{
+ "id": "anim-mvas6evb",
+ "title": "AI Operating System",
+ "mode": "behind",
+ "style": "velour",
+ "background": "solid",
+ "fps": 30,
+ "width": 1920,
+ "height": 1080,
+ "durationInFrames": 2773,
+ "startMs": 406211,
+ "endMs": 498620,
+ "endMsEffective": 498644,
+ "userBrief": "TIP 6 Your AI Operating System (BEHIND, project 406211-498620 ms)",
+ "lastRenderedVersion": 3,
+ "projectName": "tips"
+}

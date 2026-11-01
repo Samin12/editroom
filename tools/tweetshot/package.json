@@ -1,0 +1,9 @@
+{
+  "name": "editroom-tweetshot",
+  "version": "1.1.0",
+  "private": true,
+  "description": "A real, logged-out screenshot of one X post, cropped to the post, with exact phrase boxes for highlights.",
+  "type": "module",
+  "bin": { "tweetshot": "tweetshot.mjs" },
+  "dependencies": { "puppeteer": "^24.43.1" }
+}
