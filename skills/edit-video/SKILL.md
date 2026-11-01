@@ -1,168 +1,126 @@
 ---
 name: edit-video
-description: "Edit a raw recording into a finished YouTube video, end to end and fast: cut retakes and dead air, chapters, real proof screenshots, motion graphics and custom animations, privacy blur, music, render and QA. Works on a Borumi project (by name) or camera/screen files. Use when Samin says: get this edited, edit this video, edit my Borumi project, cut and visualize, make this video, finish this recording, tighten and add visuals, edit <project name>."
+description: "Edit a raw recording into a finished YouTube video at the quality of Samin's best edit (the \"10 Opus 5.5 tips\" video): real proof for every claim, one designed motion-graphics film per section, independent checks, privacy blur, chapters, captions, render, QA, imported into Borumi. Works on a Borumi project (by name) or camera/screen files. Use when Samin says: get this edited, edit this video, edit my Borumi project, cut and visualize, make this video, finish this recording, edit <project name>. A quick draft only when he asks for one."
 ---
 
 # edit-video: raw recording in, finished video out
 
-The cutroom engine (Rust, in this plugin's `engine/`) does every deterministic step: reading the
-project, cutting, layout, graphics, privacy, rendering at ~15x realtime, checks. You make the
-editorial calls and run the parallel helpers. Never hand-compute milliseconds, never write
-animation code when a beat or `scene` will do, never touch the Borumi project (it is only read).
+## Why this method
+Samin's bar is "tips - edited.mp4" (Oct 16): real tweets and pages as proof with the exact words highlighted,
+"WHY IT WORKS" / "THE TIP" kickers, checklists with icons, UI mockups, right-click callouts on his demos, the
+"TIPS 1-5 · 1/3 The Easy Tips" badge. It came from: a verified proof pack (90 claims), a beat-by-beat brief per
+section, ONE Remotion film per section built by a designer and passed by an independent checker, and a
+continuity pass. It took 13.6 h because of mechanical work (measuring boxes by hand, re-runs, placement in
+Borumi). Studio mode keeps that method and lets the cutroom engine do the mechanical parts: cuts, exact word
+frames, glyph boxes, privacy, mechanical render checks, composition and a 15x-realtime render. A cutroom-only
+edit (draft mode) is fast but was judged not good enough: use it only when he asks for a quick preview
+(`references/draft-mode.md`).
 
-**Do the whole thing without stopping.** Every gate below is yours to handle; ask Samin only when
-the project can't be identified. Never upload, publish or post anything. Never render with `--force`.
+**Hands-off.** Run everything below without stopping; ask Samin only when the project can't be identified.
+Never upload, publish or post anything; never render with `--force`; never write to his Borumi project (only a
+NEW project gets the finished video).
 
-## 0. Paths
+## 0. Paths and the timing log
+- `ER` = this plugin's root (two folders up from this skill's base directory). `C` = `~/.editroom/bin/cutroom`
+  (`bash "$ER/scripts/install.sh" --check`; the pipeline rebuilds it when `engine/` changed).
+  `S` = `python3 "$ER/scripts/studio.py"`. Work dir `W` = `~/Borumi Projects/<name> editroom/`.
+- Workflows live in `$ER/studio/workflows/`. Run each with the Workflow tool:
+  `Workflow({scriptPath: "$ER/studio/workflows/<name>.js", args: <JSON printed by S args ...>})` (pass the
+  parsed JSON object, not a string). Workflows run in the background; you get a notification when one ends.
+- Log every stage: `S log "$W" <stage> start` before, `S log "$W" <stage> end` after. Remotion renders only go
+  through `node "$ER/studio/jobs/job.mjs"` (its global queue renders a few at a time; never bypass it).
 
-- `ER` = this plugin's root: two folders up from this skill's base directory (`<ER>/skills/edit-video`).
-- `C` = `~/.editroom/bin/cutroom` (built by `bash "$ER/scripts/install.sh"`; the pipeline rebuilds it
-  when the engine source changed). Run `bash "$ER/scripts/install.sh" --check` if anything is missing.
-- Work dir `W` (default): `~/Borumi Projects/<name> editroom/`. Everything the edit produces lives
-  there; the final video is `W/out/<name> - editroom vN.mp4`.
+## 1. Identify the input and ingest
+- Borumi project: `python3 -I "$ER/scripts/find_project.py" "<name>"`; take the top match when its score is 1.0
+  or clearly ahead; if two are close, pick the one he named exactly, else ask with both paths.
+- `bash "$ER/scripts/pipeline.sh" "<project>" --until setup` (add `--timeline` if he says the Borumi timeline is
+  already cut, `--scenes 3-5` for a part, `--files --camera c.mp4 --screen s.mov --name "<name>"` for plain files,
+  `--allow <value>` for things that may stay visible). The first line prints `W`.
+- `S init "$W" --title "<video title>" [--direction "<his words about the look, if he gave any>"]`.
 
-## 1. Identify the input
+## 2. Cuts, privacy and proof, all at once
+Start both, then wait for both:
+- **Cuts + privacy** (Bash, background): `bash "$ER/scripts/pipeline.sh" --work "$W" --from-stage analyze --until analyze --agent-args=--cuts-only`.
+  It runs the privacy OCR and the editorial cut agent (detector + Opus retake judge) in parallel (about a minute
+  for 20 minutes of footage). `W/review.md` lists every cut.
+- **Proof pack** (Workflow): `S args research "$W"` -> `research-proof.js`. A planner groups his claims, one
+  capture agent + one independent verifier per group run in parallel (Sonnet), a completeness critic fills gaps,
+  an assembler writes `W/studio/proof/proof-index.json`. It starts from the raw transcript, so it doesn't wait
+  for the cuts. Rerunning skips verified groups.
 
-- A Borumi project name: `python3 -I "$ER/scripts/find_project.py" "<name>"`. Take the top match
-  when its score is 1.0 or clearly ahead; if two are close (e.g. "tips raw" vs "tips raw - sagecut"),
-  pick the one Samin named exactly, else ask with the two paths.
-- Raw takes are the default (cutroom cuts them). If Samin says the project is already cut in Borumi
-  ("use what's on the timeline"), add `--timeline`. A part only: `--scenes 3-5`.
-- Plain files: `--files --camera cam.mp4 --screen screen.mov [--mic mic.wav] --name "<name>"`.
-- Music: `--music <file>` (looped under the video, 12 dB quieter while he talks; `references/looks-and-audio.md`).
-- Values that may stay visible on screen (his own email in a demo): `--allow samin@aianswer.us`.
+## 3. Sections (needs the cuts)
+`S args plan "$W"` -> `plan-sections.js`: the section planner writes chapters (kicker, badge groups, rea cards)
+and slots (BEHIND film per talking stretch, FRONT overlay per live screen demo), runs `S resolve` (chapters into
+`beats/00-chapters.yaml`, slots snapped to output frames, a timing file and a job folder per slot, the cut lock),
+and an independent critic checks it. Then `S status "$W"`. From here the cuts are LOCKED: if anything changes
+cuts.yaml or the chapters later, run `S verify "$W"` and `S resolve "$W"`; stale briefs and renders are redone.
 
-## 2. Run the pipeline, and handle every gate yourself
+## 4. Briefs and design, pipelined per slot (needs the proof pack)
+`S args briefs "$W" --chain-design` -> `section-briefs.js`. For every slot at once: an Opus writer builds the
+beat-by-beat brief (exact frames from the timing file, glyph boxes from `S boxes`, stills of his footage), an
+independent critic checks it, a reviser applies the fixes; the moment a slot's brief is final, its design loop
+starts: an Opus designer builds the Remotion film in the velour kit, renders through the queue, then a Sonnet
+checker runs `S check-render` + `S sheet-video` and the 12-point check, and numbered fixes go back to the
+designer (at most 3 rounds). Slots that `depends_on` another slot are not chained: after the workflow ends run
+`S args design "$W"` -> `design.js` (it designs whatever has a final brief and no passing render).
 
-```bash
-bash "$ER/scripts/pipeline.sh" "<project>" [--music bed.mp3] [--timeline] [--scenes 3-5] [--allow x]
-```
+When it ends: `S status "$W"`. For slots still failing, run `S args design "$W" --only K1,K2` -> `design.js` once
+more. A slot that still fails after that keeps his plain footage there; say so in the report.
 
-Its first line is `editroom: <name> -> <W>`: remember `W`. Every later run is just
-`bash "$ER/scripts/pipeline.sh" --work "$W"` (it resumes in the right place) or with `--from-stage <stage>`.
+## 5. Continuity
+`S args continuity "$W"` -> `continuity.js`: one Opus reviewer looks at every render in order, every join and
+every chapter-card boundary; slots with blocking issues go back through `design.js` with numbered fixes.
 
-Stages: ingest → setup → analyze (privacy OCR **and** the editorial agent at once: editorial cuts,
-chapters, visuals per chapter, screen marks, all in parallel) → proofs → drop → check → sheet →
-render → qa → report. A 4-hour course reaches the first gate in a few minutes; run long videos in
-the background and wait for them. Timings go to `W/editroom-log.json`.
+## 6. Wire, render, check
+- `S wire "$W"`: every passing film becomes a frame-exact `video` beat (`fit: frame`; FRONT overlays with alpha)
+  in `W/beats/studio-films.yaml`; it refuses renders made for an older slot. Exit 2 lists missing or failing
+  slots (go back to step 4's `--only` once, then accept the gap).
+- `bash "$ER/scripts/pipeline.sh" --work "$W" --from-stage check --no-review`: check, render (`--loudnorm`, about
+  15x realtime), the ffmpeg QA (`W/qa.md`) and the report. Exit 11 = check errors: read `W/logs/check.txt`, fix
+  (a blur stays, a film beat with a wrong file gets re-wired), rerun with `--from-stage check`.
 
-**Loop until it exits 0. Never stop to ask Samin at a gate.** Each gate allows 2 rounds; the
-pipeline counts them (`round N` in the message) and moves on by itself after that.
+## 7. Final QA, Borumi, report
+- `S args final-qa "$W"` -> `final-qa.js`: three read-only reviewers (cards and joins, narrative flow, a full
+  watch-through against the proof pack and privacy rules). Fix every blocker and major through its owner:
+  `design --only <KEY>` then `S wire`, a cut line in `cuts.yaml`, a blur beat, the chapters; then re-render with
+  `pipeline.sh --work "$W" --from-stage render`. Minors go in the report.
+- Borumi: `python3 "$ER/studio/borumi/import.py" "$W"` creates a NEW project "<name> - editroom" with the finished
+  video (his source project is never touched). If that script is not installed yet, skip it and say so.
+- `S report "$W"` (slots, renders, checks, continuity, final QA, stage times) plus `W/report.md` and `W/qa.md`.
 
-| exit | meaning | what you do, automatically |
-|---|---|---|
-| 0 | finished | section 6 |
-| 10 | proofs pending | **Gate 10** below, then `--work "$W"` (continues at drop) |
-| 11 | check errors | **Gate 11** below, then `--work "$W"` (continues at check) |
-| 12 | contact sheets ready | **Gate 12** below, then `--work "$W" --from-stage check` if you changed beats, else `--work "$W"` (continues at render) |
-| 1 | a stage failed | read the `FAILED <stage>` line and `W/logs/<stage>.log`, fix per `references/troubleshooting.md`, rerun `--from-stage <stage>`. Failing twice the same way: stop and tell Samin what broke (an error, not a question) |
+Reply to Samin, short and speakable:
+- The video path, raw length -> final length, wall time and where it went (from the stage times).
+- The YouTube chapters block, ready to paste.
+- Cuts he can undo: `W/review.md` lists every cut with its time and why; to restore one, delete its line in
+  `W/cuts.yaml`, then `S verify`/`S resolve` and redo the stale slots (tell him which those would be).
+- Flags: accuracy (claims the proof did not support, with the honest line), names corrected from the
+  transcript, privacy (third parties in his footage), legal (third-party clips or music), slots without a film.
+- What's next: only his actions (watch it, decide on flags, upload). Open the video (`open "<video>"`).
 
-### Gate 10: proofs pending
+## Rules that keep the quality (the designer brief has the full list)
+- Proof first: a claim gets the real page or post, with ONE highlight on the exact words he says, and a source
+  pill. A concept gets a simple diagram that builds on his words. Nothing static over ~4 s, nothing empty.
+- Honesty: never a number, name or quote the source doesn't support; when he overstates, show the true line and
+  flag it. Correct spellings of names on screen, never the transcript's.
+- Privacy: no third-party names, chats, calendars, emails; never his paid community's price; every finding
+  blurred (render refuses otherwise).
+- Cuts: keep the last complete take of a restarted line; be decisive (25 to 35% of raw usually goes).
 
-`W/proofs-pending.json` lists image beats waiting for proof: `claim`, `find`, `src` (where the PNG
-goes), `line` (talk or screen), `file` + `index` (the beat), `out` (its time). Spawn **one
-`editroom:proof-capturer` per request, all in a single message** (parallel, Sonnet; batches of 12
-when there are more than ~25). Give each: the request JSON, `W`, and
-`node "$ER/scripts/capture_proof.mjs"`. Each writes only the PNG at `src`, its sidecar, and
-`W/proof/<slug>.source.json` (verdict, URL, highlight, source pill, optional corrected `caption`, flag).
-
-When all have returned, rerun. Round 2 (only when a capture failed for a transient reason: a
-timeout, a crashed browser) is `--from-stage proofs`, which re-lists what is still missing. After
-round 2 the pipeline drops the rest by itself: `drop` writes each capture's highlight, source pill
-and corrected caption onto its beat, then turns every request still without a PNG into a text beat
-(title, quote or callout with its claim) or removes it.
-
-### Gate 11: check has errors
-
-Read `W/logs/check.txt`. Each error names a beats file and the beat (its anchor or time and kind).
-- Rounds 1 and 2: fix them in `W/beats/*.yaml`: an anchor on a cut or unknown phrase → the nearest
-  kept word id (`C brief W --from wA --to wB` shows the kept words); overlapping stage beats → end the
-  first one earlier (`until`) or drop the weaker one; a scene layer missing a field → add it
-  (`references/scenes.md`); a missing file → remove the beat. Never delete or weaken a blur beat:
-  an unblurred privacy finding gets a blur beat, not a `--force`.
-- Round 3 and later (the message says so): **remove** every beat an error names. Move its line into
-  `W/agent/removed-by-check.yaml` so the report lists it, then rerun.
-
-### Gate 12: review the contact sheets
-
-`W/review/sheet-NN.png` (about 20 frames each, 4 per row) with `sheet-NN.md` listing every frame's
-time, kind, text and beats file. Up to 3 sheets: Read them yourself. More: spawn one
-`editroom:visual-reviewer` per sheet in one message (parallel, Sonnet) and collect their numbered fixes.
-Look for: text cut off or overlapping, a stage visual covering what he is demonstrating, an empty
-panel, a ring or zoom off target, a headline stronger than his words, anything private, his
-community's price, a misspelled name. When a thumbnail is too small to judge:
-`C still W --at o:<seconds> -o /tmp/x.png`. Apply every **blocking** fix and the clear minor ones
-to `W/beats/*.yaml`, then rerun with `--from-stage check` (changed) or plain (nothing to change).
-After 2 rounds the pipeline renders without stopping.
-
-## 3. Make it better than the templates (custom animation)
-
-Cutroom's templates (title, bullets, number, image, video, code, quote, ring, highlight, arrow,
-callout, lower, blur, zoom, layout) cover most beats. For a moment that deserves more, use a
-**`scene` beat**: a custom keyframed animation (text, boxes, arrows, counters, images, highlights)
-drawn natively by the engine, frame-exact, ~2 ms per frame. Recipes: `references/scenes.md`.
-
-- The agent already writes 1 to 3 scenes per chapter for hero moments. Add more when Samin asks
-  ("animate the pipeline part") or when a concept runs > 20 s on the talking head with only a title.
-- Several scenes: spawn one `editroom:scene-designer` per moment in one message (parallel). Each writes
-  `W/beats/scene-<slug>.yaml` with a `scope:` and checks its own stills. Then `--from-stage check`.
-- **Escape hatch (≤ 2 per video, only for a truly special moment cutroom can't draw, e.g. a 3D or
-  physics look):** a Remotion job in `~/.borumi-agent/animation-kit` (its `GUIDE.md`), rendered
-  **one at a time** (h264, or ProRes 4444 when it needs transparency), then dropped in as
-  `{at: …, until: …, kind: video, src: clips/<name>.mov, fit: frame, alpha: true, loop: false}`.
-  Never render several Remotion jobs at once: that is what pinned the Mac at 100% on Oct 29.
-
-## 4. Look, sound, privacy (all on by default)
-
-- Look: `style:` in `W/edit.yaml` (accent, canvas, ink, card, dot pitch). Samin's dark dot-grid,
-  panel-left, camera-right look is the default. `references/looks-and-audio.md`.
-- Sound: rendered with `--loudnorm` (-14 LUFS, true peak -1). Music bed via `--music`.
-- Privacy: `cutroom privacy` always runs (keys, tokens, passwords, emails, phones, cards, plus
-  `W/privacy-rules.yaml`: `patterns` for his community price, Skool about pages, order numbers,
-  addresses; `allow` for values that may show; `skip` for built-in kinds to leave out). Every
-  finding is blurred, and render refuses while one is visible. Third-party names, DMs and
-  calendars in his footage: flag them in the report (his footage, his call).
-- Creator voice and rules the agent follows: `W/style.md` (from `templates/style.md`). Edit it per
-  video if Samin gives direction ("keep it loose", "more visuals in part 2").
-
-## 5. The rules that keep quality high
-
-Condensed in `references/editorial-rules.md`; read it before fixing cuts or beats by hand. The core:
-- Keep the last complete take of a restarted line; cut every other attempt. A restart re-says the
-  same words; a next point moves forward. Be decisive: 25 to 35% of raw takes usually goes.
-- Proof over animation. Never show a number, name or claim the source does not support. When he
-  overstates, show the true source line and flag it. Label strength matches his words.
-- Stage visuals on talking-head stretches; overlays (ring, zoom, highlight, arrow) while he is
-  demonstrating. One idea at a time, ≥ 2 s each, nothing static > ~4 s, headlines < 7 words, no em dashes.
-- Chapters: 2 to 5 words, Title Case, "Why This Matters" first after the intro, no "Level N" on cards.
-
-## 6. Report to Samin
-
-When the pipeline exits 0, read `W/report.md` and `W/qa.md`. Fix any QA **blocker/major** first
-(`--work "$W" --from-stage render`; a re-render takes minutes). Then reply, short and speakable:
-
-- The video path (the Borumi project is untouched), raw length → final length, render time.
-- The YouTube chapters block, ready to paste (it is in the report).
-- **Cuts he can undo:** `W/review.md` lists every cut the agent made, with its time in the video and
-  in the raw recording, the words removed and why. The agent can occasionally cut something he meant
-  to keep (an instruction, an aside). To restore one: delete that line (`by: agent`) from
-  `W/cuts.yaml` and rerun with `--from-stage check` (not `analyze`, which regenerates the agent's
-  cuts). There is no keep list; changing `by:` does not restore the words.
-- On-screen corrections: names the transcript misspelled that the captions now spell from the source.
-- Flags: accuracy (claims the proof did not support), privacy (third parties in his footage), legal
-  (third-party clips or music), each with a timestamp and a suggested fix. Claims are never
-  silently changed. Beats removed at the check gate, if any.
-- What's next: only his actions (watch it, decide on flags, upload).
-
-Open the video for him (`open "<video>"`) unless he said not to. Never upload or publish it.
+## Failure handling
+- A workflow returns `null` for an agent (it died): rerun the same `S args ...` + workflow; finished slots and
+  verified groups are skipped (state is on disk: briefs, `design-report.json`, `checks/check-v<N>.json`).
+- A stage fails twice the same way: stop and tell Samin what broke (an error, not a question).
+- `references/troubleshooting.md` covers the engine, the pipeline and gates; `references/studio.md` covers the
+  studio files and commands in detail.
 
 ## References
-
 | File | Read when |
 |---|---|
-| `references/editorial-rules.md` | fixing cuts or beats by hand; judging retakes; chapter and card rules |
-| `references/proof.md` | what counts as proof, honesty rules, capture recipes (pages, X posts, GitHub numbers) |
-| `references/scenes.md` | writing a `scene` beat (custom animation) |
-| `references/qa.md` | QA findings and fixes, the final watch-through |
+| `references/studio.md` | the studio work dir layout, every `studio.py` command, resuming a stage |
+| `references/editorial-rules.md` | judging retakes, chapter and card rules |
+| `references/proof.md` | what counts as proof, honesty rules, capture recipes |
+| `references/qa.md` | QA findings and fixes |
 | `references/looks-and-audio.md` | theme, layout, music bed, loudness, captions |
+| `references/draft-mode.md` | Samin asks for a quick draft (cutroom templates only) |
+| `references/scenes.md` | draft mode's native `scene` animations |
 | `references/troubleshooting.md` | a stage failed, the engine is old, a gate loops |
