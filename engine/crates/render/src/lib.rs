@@ -10,6 +10,7 @@ pub mod blit;
 pub mod encode;
 pub mod feed;
 pub mod frame;
+pub mod layout;
 pub mod outputs;
 
 use anyhow::{anyhow, Context, Result};
