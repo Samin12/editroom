@@ -11,7 +11,8 @@ milliseconds, never write animation code, never touch a timeline by hand.
 
 ```
 cutroom ingest borumi "<bundle>.bmprojbundle" work/   # raw takes (read-only; --scenes 3-5 for a part), or: ingest files work/ --camera c.mp4 --screen s.mov
-cutroom agent work/               # headless first pass: cut review + chapters + visuals per chapter (claude -p, parallel)
+cutroom agent work/               # headless first pass, parallel (claude -p): editorial cuts (opus) + chapters + visuals per chapter + screen marks
+cutroom proofs work/ [--drop-missing]   # proof screenshots still to capture (JSON); --drop-missing turns the rest into text beats
 cutroom cut work/ [--accept 1,3,7-9]   # retakes, false starts, fillers, silences -> cuts.yaml (+ review.md)
 cutroom privacy work/ [--allow me@x.com]   # OCR secrets on screen -> beats/privacy.yaml (blur beats)
 cutroom brief work/ --from w0 --to w2000    # kept transcript: "w123 one sentence per line"
@@ -24,8 +25,12 @@ cutroom render work/ -o final.mp4 # + final.chapters.txt + final.srt
 ## 1. Cuts
 `cutroom cut` writes confident cuts to `cuts.yaml` and only the ambiguous ones to `review.md`
 (each with context and word ids). Decide each item, then `cutroom cut work/ --accept 1,3,7-9`.
-Other cuts go in `edit.yaml` under `cuts:` (cuts.yaml is regenerated):
-`- {from: w812, to: w830, why: retake}` (inclusive word range; the LAST attempt is the keeper).
+`cutroom agent` does all of it: detector cuts, its unsure candidates judged, plus an editorial pass
+(retakes the detector could not pair, section restarts, repeats), each line `by: agent` in
+cuts.yaml with a `note`; review.md then summarizes every cut with output timestamps.
+Your own cuts: add `- {from: w812, to: w830, why: retake, by: human}` to cuts.yaml (inclusive word
+range; the LAST attempt is the keeper). `cut` and `agent` regenerate their own cuts and keep
+`by: human` ones (`cut` also keeps `by: agent`).
 Never cut inside a word or leave a half sentence; `cutroom brief` after cutting shows what survives.
 
 ## 2. Chapters (edit.yaml)
