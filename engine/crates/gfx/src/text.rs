@@ -102,22 +102,24 @@ pub fn tokens(text: &str, markup: bool) -> Vec<Tok> {
     for (li, line) in text.split('\n').enumerate() {
         let mut first = true;
         for w in line.split_whitespace() {
-            let mut w = w;
+            let mut w = w.to_string();
             let mut tag_on = accent;
             let mut close = false;
             if markup {
-                if let Some(rest) = w.strip_prefix('*') {
-                    w = rest;
+                // `*word*`, also with punctuation outside the stars: `"*one line*".`
+                let punct = |s: &str| s.chars().all(|c| c.is_ascii_punctuation() && c != '*');
+                if let Some(i) = w.find('*').filter(|&i| punct(&w[..i])) {
+                    w.remove(i);
                     tag_on = true;
                     accent = true;
                 }
-                if let Some(rest) = w.strip_suffix('*') {
-                    w = rest;
+                if let Some(i) = w.rfind('*').filter(|&i| punct(&w[i + 1..])) {
+                    w.remove(i);
                     close = true;
                 }
             }
             if !w.is_empty() {
-                out.push(Tok { text: w.to_string(), tag: tag_on as u8, brk: li > 0 && first });
+                out.push(Tok { text: w, tag: tag_on as u8, brk: li > 0 && first });
                 first = false;
             }
             if close {
@@ -390,6 +392,11 @@ mod tests {
         assert!(t[4].brk && !t[3].brk);
         let raw = tokens("a *b*", false);
         assert_eq!(raw[1].text, "*b*");
+        // punctuation outside the stars
+        let p = tokens("Paste *one line*. \"*Now*\" done", true);
+        assert_eq!(p.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["Paste", "one", "line.", "\"Now\"", "done"]);
+        assert_eq!(p.iter().map(|t| t.tag).collect::<Vec<_>>(), [0, 1, 1, 1, 0]);
+        assert_eq!(tokens("2*3 = 6", true)[0].text, "2*3", "a star inside a word stays");
     }
 
     #[test]
