@@ -10,6 +10,8 @@
 //!   cutroom sheet <dir> [--beats|--every 60] -o f.png   contact sheet (one image to review many frames)
 //!   cutroom render <dir> -o out.mp4                     parallel render + chapters.txt + captions.srt
 //!   cutroom stats <dir>                                 sizes, durations, token footprint
+//!   cutroom agent <dir>                                 editorial cuts, chapters, visuals, screen marks (Claude, parallel)
+//!   cutroom proofs <dir> [--drop-missing]               proof screenshots still to capture (JSON)
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -23,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 mod agent;
+mod proofs;
 
 #[derive(Parser)]
 #[command(name = "cutroom", version, about = "Agentic video editor engine: word-anchored edits, native motion graphics, parallel render")]
@@ -140,21 +143,47 @@ enum Cmd {
     },
     /// Durations, counts and the token footprint of the edit.
     Stats { dir: PathBuf },
-    /// Editorial passes through Claude Code (`claude -p`): cut review, chapters, beats per chapter in parallel.
+    /// Editorial passes through Claude Code (`claude -p`), in parallel: editorial cuts, chapters,
+    /// visuals per chapter (with proof requests and custom scenes) and screen marks.
     Agent {
         dir: PathBuf,
-        /// Model alias for `claude --model` (sonnet, opus, haiku).
+        /// Model for chapters and visuals (`claude --model`: sonnet, opus, haiku or an id).
         #[arg(long, default_value = "sonnet")]
         model: String,
-        /// Chapters written in parallel.
+        /// Model for the editorial cut pass.
+        #[arg(long, default_value = "opus")]
+        cut_model: String,
+        /// Model for the screen pass (looks at frames).
+        #[arg(long, default_value = "sonnet")]
+        screen_model: String,
+        /// Calls in flight at once, per pass.
         #[arg(long, default_value_t = 8)]
         jobs: usize,
-        /// Skip the cut review (keep only confident cuts).
+        /// Leave the detector's unsure candidates in (keep only its confident cuts).
         #[arg(long)]
         no_review: bool,
-        /// Only the cut review.
+        /// Skip the editorial cut pass (only the detector, plus its review).
+        #[arg(long)]
+        no_editorial: bool,
+        /// Skip the screen pass (rings, highlights, zooms on the screen recording).
+        #[arg(long)]
+        no_screen: bool,
+        /// Do not offer custom `scene` animations.
+        #[arg(long)]
+        no_scenes: bool,
+        /// Only the cuts.
         #[arg(long)]
         cuts_only: bool,
+        /// Words per editorial chunk (chunks overlap by 15%).
+        #[arg(long, default_value_t = 1500)]
+        chunk_words: usize,
+    },
+    /// Proof screenshots still to capture: image beats with a `proof` request and no file (JSON).
+    Proofs {
+        dir: PathBuf,
+        /// Turn each still-missing proof into a title / quote / callout with its claim, or remove it.
+        #[arg(long)]
+        drop_missing: bool,
     },
 }
 
@@ -303,7 +332,12 @@ fn main() -> Result<()> {
                 report = cutroom_cut::accept(&report, &idx);
                 println!("accepted {} review items", idx.len());
             }
-            let yaml = cutroom_cut::to_yaml(&report);
+            let mut yaml = cutroom_cut::to_yaml(&report);
+            // the detector's cuts are regenerated; the agent's and hand-written ones stay
+            let kept = agent::kept_cuts(base, true);
+            let (by_agent, by_human): (Vec<_>, Vec<_>) = kept.into_iter().partition(|c| c.by.as_deref() == Some("agent"));
+            agent::append_cuts(&mut yaml, "editorial cuts (cutroom agent; delete a line to undo it)", &by_agent);
+            agent::append_cuts(&mut yaml, "human cuts (kept when cuts are regenerated)", &by_human);
             std::fs::write(base.join("cuts.yaml"), yaml)?;
             let review = cutroom_cut::review_md(&report, &src);
             std::fs::write(base.join("review.md"), &review)?;
@@ -416,6 +450,13 @@ fn main() -> Result<()> {
                 print!("{}", lint::format(&errors));
                 bail!("{} errors: fix them (cutroom check) or pass --force", errors.len());
             }
+            let pending = lint::pending_proofs(&p.plan, &p.loaded.dir);
+            if !pending.is_empty() && !force {
+                for b in &pending {
+                    println!("pending {:>9} {} ({})", clock(b.start_ms), b.kind.name(), b.origin);
+                }
+                bail!("{} proofs are still pending: capture them (`cutroom proofs` lists them) or run `cutroom proofs --drop-missing`; --force renders anyway", pending.len());
+            }
             let range = match (&from, &to) {
                 (None, None) => None,
                 _ => Some((from.as_deref().map(|a| out_time(&p, a)).transpose()?.unwrap_or(0.0), to.as_deref().map(|a| out_time(&p, a)).transpose()?.unwrap_or(p.plan.duration_ms()))),
@@ -452,8 +493,9 @@ fn main() -> Result<()> {
             );
             std::fs::write(format!("{}.report.json", stem.display()), serde_json::to_string_pretty(&r)?)?;
         }
-        Cmd::Agent { dir, model, jobs, no_review, cuts_only } => {
-            let u = agent::run(&dir, &agent::AgentOpts { model, jobs, review: !no_review, beats: !cuts_only })?;
+        Cmd::Agent { dir, model, cut_model, screen_model, jobs, no_review, no_editorial, no_screen, no_scenes, cuts_only, chunk_words } => {
+            let o = agent::AgentOpts { model, cut_model, screen_model, jobs, review: !no_review, editorial: !no_editorial, screen: !no_screen, scenes: !no_scenes, beats: !cuts_only, chunk_words };
+            let u = agent::run(&dir, &o)?;
             println!(
                 "agent: {} calls, {} input tokens ({} cached), {} output tokens, ${:.3}, {:.0}s",
                 u.calls,
@@ -463,6 +505,15 @@ fn main() -> Result<()> {
                 u.cost_usd,
                 u.wall_s
             );
+        }
+        Cmd::Proofs { dir, drop_missing } => {
+            if drop_missing {
+                for line in proofs::drop_missing(&dir)? {
+                    println!("{line}");
+                }
+            } else {
+                println!("{}", serde_json::to_string_pretty(&proofs::pending(&dir)?)?);
+            }
         }
         Cmd::Stats { dir } => {
             let p = open(&dir, None)?;
