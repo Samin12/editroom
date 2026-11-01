@@ -1,0 +1,12 @@
+# A diagram that builds on the words: three nodes, two arrows, a return path.
+kind: scene
+layers:
+  - {type: text, text: "How *Claude* talks to Poppy", x: 0.07, y: 0.08, size: 88, weight: bold}
+  - {type: text, text: "One MCP server. No glue code.", x: 0.07, y: 0.205, size: 40, weight: regular, color: muted, in: {at: "+0.3s"}}
+  - {id: claude, type: box, x: 0.06, y: 0.4, w: 0.25, h: 0.24, label: Claude, sub: your agent, in: {at: w2, from: up}}
+  - {id: mcp, type: box, x: 0.375, y: 0.4, w: 0.25, h: 0.24, label: "*MCP*", sub: one URL, fill: accent_soft, stroke: accent, width: 3, in: {at: w5, from: pop}}
+  - {id: poppy, type: box, x: 0.69, y: 0.4, w: 0.25, h: 0.24, label: Poppy, sub: your data, in: {at: w8, from: up}}
+  - {type: arrow, from: claude, to: mcp, in: {at: w4}}
+  - {type: arrow, from: mcp, to: poppy, in: {at: w7}}
+  - {type: arrow, from: [0.815, 0.68], to: [0.185, 0.68], curve: -0.1, color: muted, width: 4, in: {at: w10, ms: 900}}
+  - {type: text, text: "answers come back in *seconds*", x: 0.5, y: 0.8, size: 40, align: center, color: ink_soft, in: {at: w11}}

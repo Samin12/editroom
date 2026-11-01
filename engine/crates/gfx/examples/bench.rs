@@ -8,6 +8,18 @@ use cutroom_gfx::{Gfx, Pixmap, Rect, ScreenMap, Theme};
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+/// A `scene` beat from examples/scenes (word anchors `wN` land at 0.4 s + N x 0.3 s).
+fn scene(name: &str, start: f64, end: f64) -> ResolvedBeat {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scenes").join(format!("{name}.yaml"));
+    let kind: BeatKind = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let BeatKind::Scene { layers, .. } = &kind else { panic!("{name} is not a scene") };
+    let at = |a: &cutroom_core::spec::Anchor| -> anyhow::Result<f64> { Ok(400.0 + a.0.trim_start_matches('w').parse::<f64>()? * 300.0 - 130.0) };
+    let (flat, _) = cutroom_core::scene::resolve_times(layers, start, end, &at);
+    let mut b = beat(kind, start, end);
+    b.items_ms = flat;
+    b
+}
+
 fn beat(kind: BeatKind, start: f64, end: f64) -> ResolvedBeat {
     ResolvedBeat { idx: 0, lane: kind.lane(), kind, start_ms: start, end_ms: end, items_ms: vec![], words: vec![], origin: "bench".into() }
 }
@@ -51,6 +63,9 @@ fn main() -> anyhow::Result<()> {
         ("video", beat(BeatKind::Video { src: "clip.mp4".into(), from: None, caption: Some("Real footage".into()) }, 0.0, 5000.0)),
         ("code", beat(BeatKind::Code { text: "$ claude mcp add poppy --transport http https://mcp.getpoppy.ai\n# then ask:\n> Find the three best hooks in my last 20 videos.".into(), title: Some("Terminal".into()) }, 0.0, 6000.0)),
         ("quote", beat(BeatKind::Quote { text: "The best time to post was yesterday.".into(), by: Some("Every creator".into()) }, 0.0, 4000.0)),
+        ("scene-diag", scene("diagram", 0.0, 7000.0)),
+        ("scene-stat", scene("stat", 0.0, 7000.0)),
+        ("scene-code", scene("code", 0.0, 7000.0)),
     ];
     let overlays: Vec<(&str, ResolvedBeat)> = vec![
         ("ring", beat(BeatKind::Ring { rect: [0.2, 0.2, 0.2, 0.2] }, 0.0, 3000.0)),
@@ -93,6 +108,10 @@ fn main() -> anyhow::Result<()> {
             let m = if *name == "video" { Some(&media) } else { None };
             put(name, time(120, b.start_ms, b.end_ms, |t| g.stage(&mut pm, panel, b, t, m)));
         }
+        // a full-frame scene draws into the whole frame
+        let steps = scene("steps", 0.0, 7000.0);
+        let full = Rect::from_xywh(0.0, 0.0, w as f32, h as f32).unwrap();
+        put("scene-steps", time(120, steps.start_ms, steps.end_ms, |t| g.stage(&mut pm, full, &steps, t, None)));
         for (name, b) in &overlays {
             put(name, time(120, b.start_ms, b.end_ms, |t| g.overlay(&mut pm, &map, b, t)));
         }

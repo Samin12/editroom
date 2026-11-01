@@ -1,10 +1,14 @@
 //! Renders every beat kind, the chapter card, badge, captions and the canvas at a few local
 //! times onto full 1920x1080 frames (a fake grey "screen" in the panel, a fake camera tile),
-//! and writes PNGs plus a contact sheet to /private/tmp/cutroom-gfx-gallery/.
+//! and writes PNGs plus a contact sheet to /private/tmp/cutroom-gfx-gallery/ (or
+//! $CUTROOM_GALLERY_OUT).
 //!
 //! `cargo run -p cutroom-gfx --release --example gallery`
 //! Set CUTROOM_GALLERY_IMAGE=/path/to/screenshot.png to use a real screenshot for the image
 //! beat (its highlight is then the top-left quarter).
+//!
+//! `scene` beats come from `examples/scenes/*.yaml` (word anchors `wN` land at 0.4 s + N x 0.3 s).
+//! Set CUTROOM_GALLERY_MP4=1 to also write `scene-<name>.mp4` (needs ffmpeg).
 
 use cutroom_core::resolve::{OutWord, ResolvedBeat, ResolvedChapter};
 use cutroom_core::spec::{BeatKind, Item};
@@ -15,10 +19,33 @@ use tiny_skia::{Color, FillRule, GradientStop, LinearGradient, Mask, Paint, Path
 
 const W: u32 = 1920;
 const H: u32 = 1080;
-const OUT: &str = "/private/tmp/cutroom-gfx-gallery";
+const OUT_DEFAULT: &str = "/private/tmp/cutroom-gfx-gallery";
 
 fn beat(kind: BeatKind, start: f64, end: f64) -> ResolvedBeat {
     ResolvedBeat { idx: 0, lane: kind.lane(), kind, start_ms: start, end_ms: end, items_ms: vec![], words: vec![], origin: "gallery".into() }
+}
+
+/// A `scene` beat from a YAML file in examples/scenes, its layer times resolved with fake word
+/// timings (`wN` at 400 + 300 N ms), linted against the asset folder.
+fn scene_beat(name: &str, start: f64, end: f64, assets: &Path) -> ResolvedBeat {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scenes").join(format!("{name}.yaml"));
+    let kind: BeatKind = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let BeatKind::Scene { place, layers, .. } = &kind else { panic!("{name} is not a scene") };
+    for (sev, m) in cutroom_core::scene::lint(layers, *place, assets, Some([0.7966, 0.2126, 0.1843, 0.5747])) {
+        println!("{name}: {sev:?} {m}");
+    }
+    let at = |a: &cutroom_core::spec::Anchor| -> anyhow::Result<f64> {
+        let n: f64 = a.0.trim_start_matches('w').parse()?;
+        Ok(400.0 + n * 300.0 - 130.0)
+    };
+    let (flat, probs) = cutroom_core::scene::resolve_times(layers, start, end, &at);
+    for (sev, m) in probs {
+        println!("{name}: {sev:?} {m}");
+    }
+    let mut b = beat(kind, start, end);
+    b.items_ms = flat;
+    b.words = words("so here is how claude talks to the mcp server and poppy answers back in seconds", 400.0, 300.0);
+    b
 }
 
 fn words(text: &str, start: f64, per: f64) -> Vec<OutWord> {
@@ -164,6 +191,26 @@ struct Scene {
 }
 
 impl Scene {
+    /// A full-frame stage beat (`scene` with `place: frame`): no panel slot, camera on top.
+    fn base_frame(&self, t: f64, b: &ResolvedBeat) -> Pixmap {
+        let mut pm = Pixmap::new(W, H).unwrap();
+        let g = &self.gfx;
+        g.canvas(&mut pm, t);
+        g.slot_shadow(&mut pm, self.camera, g.slot_radius());
+        g.stage(&mut pm, Rect::from_xywh(0.0, 0.0, W as f32, H as f32).unwrap(), b, t, None);
+        blit_slot(&mut pm, &self.cam, self.camera, g.slot_radius());
+        g.badge(&mut pm, self.badge, &self.chapter, 8, t);
+        pm
+    }
+
+    fn scene_frame(&self, t: f64, b: &ResolvedBeat) -> Pixmap {
+        if b.kind.full_frame() {
+            self.base_frame(t, b)
+        } else {
+            self.base(t, Some((b, None)))
+        }
+    }
+
     fn base(&self, t: f64, stage: Option<(&ResolvedBeat, Option<&Pixmap>)>) -> Pixmap {
         let mut pm = Pixmap::new(W, H).unwrap();
         let g = &self.gfx;
@@ -181,8 +228,10 @@ impl Scene {
 }
 
 fn main() -> anyhow::Result<()> {
-    std::fs::create_dir_all(OUT)?;
-    let assets = Path::new(OUT).join("assets");
+    let out_dir = std::env::var("CUTROOM_GALLERY_OUT").unwrap_or_else(|_| OUT_DEFAULT.to_string());
+    let out_dir = out_dir.as_str();
+    std::fs::create_dir_all(out_dir)?;
+    let assets = Path::new(out_dir).join("assets");
     std::fs::create_dir_all(&assets)?;
     let gfx = Gfx::new(Theme::from_style(&BTreeMap::new()), W, H, &assets)?;
     let px = |r: [f32; 4]| Rect::from_xywh(r[0] * W as f32, r[1] * H as f32, r[2] * W as f32, r[3] * H as f32).unwrap();
@@ -257,6 +306,16 @@ fn main() -> anyhow::Result<()> {
     let quote = beat(BeatKind::Quote { text: "The best time to post was yesterday. The *second best* is today.".into(), by: Some("Every creator, ever".into()) }, 0.0, 4000.0);
     push("70-quote-2500", sc.base(2500.0, Some((&quote, None))));
 
+    // Scenes (custom animations).
+    let mut scenes: Vec<(&str, ResolvedBeat)> = vec![];
+    for name in ["diagram", "stat", "code", "steps"] {
+        let b = scene_beat(name, 0.0, 7000.0, &assets);
+        for t in [700.0, 1900.0, 3200.0, 6200.0] {
+            push(&format!("75-scene-{name}-{t:04}"), sc.scene_frame(t, &b));
+        }
+        scenes.push((name, b));
+    }
+
     // Overlays on the fake screen.
     let mut pm = sc.base(1500.0, None);
     g.overlay(&mut pm, &sc.map, &beat(BeatKind::Ring { rect: [0.185, 0.19, 0.205, 0.23] }, 0.0, 3000.0), 1500.0);
@@ -307,12 +366,33 @@ fn main() -> anyhow::Result<()> {
         g4.stage(&mut pm, p4, &bullets, 4500.0, None);
         let b4 = Rect::from_xywh(0.7966 * w4 as f32, 0.2126 * h4 as f32 - 332.0, 0.1843 * w4 as f32, 300.0).unwrap();
         g4.badge(&mut pm, b4, &sc.chapter, 8, 5000.0);
-        pm.save_png(format!("{OUT}/zz-bullets-2160p.png"))?;
+        pm.save_png(format!("{out_dir}/zz-bullets-2160p.png"))?;
+    }
+
+    // Optional MP4s of each scene (raw frames piped to ffmpeg).
+    if std::env::var("CUTROOM_GALLERY_MP4").is_ok() {
+        use std::io::Write;
+        for (name, b) in &scenes {
+            let out = format!("{out_dir}/scene-{name}.mp4");
+            let mut ff = std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", &format!("{W}x{H}"), "-r", "30", "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", &out])
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            let mut stdin = ff.stdin.take().unwrap();
+            let frames = (b.end_ms / 1000.0 * 30.0) as u64 + 15;
+            for k in 0..frames {
+                let pm = sc.scene_frame(k as f64 * 1000.0 / 30.0, b);
+                stdin.write_all(pm.data())?;
+            }
+            drop(stdin);
+            ff.wait()?;
+            println!("wrote {out}");
+        }
     }
 
     // Write PNGs and the contact sheet.
     for (name, pm) in &frames {
-        pm.save_png(format!("{OUT}/{name}.png"))?;
+        pm.save_png(format!("{out_dir}/{name}.png"))?;
     }
     let cols = 4u32;
     let (tw, th) = (480u32, 270u32);
@@ -325,7 +405,7 @@ fn main() -> anyhow::Result<()> {
         let tr = Transform::from_row(tw as f32 / W as f32, 0.0, 0.0, th as f32 / H as f32, (gap + c * (tw + gap)) as f32, (gap + r * (th + gap)) as f32);
         sheet.draw_pixmap(0, 0, pm.as_ref(), &PixmapPaint { quality: tiny_skia::FilterQuality::Bicubic, ..Default::default() }, tr, None);
     }
-    sheet.save_png(format!("{OUT}/contact-sheet.png"))?;
-    println!("wrote {} frames + contact-sheet.png to {OUT}", frames.len());
+    sheet.save_png(format!("{out_dir}/contact-sheet.png"))?;
+    println!("wrote {} frames + contact-sheet.png to {out_dir}", frames.len());
     Ok(())
 }
