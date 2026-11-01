@@ -117,6 +117,31 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
                 out.push(issue(sev, Some(b.start_ms), format!("scene ({}): {m}", b.origin)));
             }
         }
+        // something that enters in the last second of its beat never reads
+        let late: Vec<(String, f64)> = match &b.kind {
+            BeatKind::Bullets { items, .. } => items.iter().zip(&b.items_ms).map(|(it, t)| (format!("item {:?}", it.text()), *t)).collect(),
+            BeatKind::Scene { layers, .. } => crate::scene::unflatten(layers, &b.items_ms)
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| t.enter.filter(|v| v.is_finite()).map(|v| (crate::scene::label(i, &layers[i]), v)))
+                .collect(),
+            _ => vec![],
+        };
+        for (what, t) in late {
+            if t > b.end_ms - 1000.0 && t > b.start_ms + 1.0 {
+                out.push(issue(Severity::Warn, Some(t), format!("{} ({}): {what} appears {:.1}s before the beat ends, too late to read; end the beat later (`until`)", b.kind.name(), b.origin, (b.end_ms - t) / 1000.0)));
+            }
+        }
+        // "TIP 3" on screen must be the chapter it sits in
+        for (what, text) in numbered_texts(&b.kind) {
+            if let Some((word, k)) = numbered(&text, &plan.output.kicker) {
+                let cur = plan.chapter_at(b.start_ms + 1.0).map(|c| c.n);
+                if cur != Some(k) {
+                    let at = cur.map(|c| format!("chapter {c} ({} {c})", word.to_uppercase())).unwrap_or_else(|| "the intro, before chapter 1".into());
+                    out.push(issue(Severity::Warn, Some(b.start_ms), format!("{} ({}): {what} {text:?} sits in {at}; numbers on screen follow the chapter order", b.kind.name(), b.origin)));
+                }
+            }
+        }
         for r in rects(&b.kind) {
             if r[2] <= 0.0 || r[3] <= 0.0 || r[0] < -0.01 || r[1] < -0.01 || r[0] + r[2] > 1.01 || r[1] + r[3] > 1.01 {
                 out.push(issue(Severity::Error, Some(b.start_ms), format!("{} ({}): rect {r:?} must be [x, y, w, h] inside 0..1", b.kind.name(), b.origin)));
@@ -172,6 +197,33 @@ pub fn check(plan: &Plan, src: &Source, segs: &[Seg], spec_dir: &Path, findings:
 /// Image beats with a `proof` request whose file does not exist yet.
 pub fn pending_proofs<'a>(plan: &'a Plan, spec_dir: &Path) -> Vec<&'a ResolvedBeat> {
     plan.beats.iter().filter(|b| matches!(&b.kind, BeatKind::Image { src, proof: Some(_), .. } if !spec_dir.join(src).exists())).collect()
+}
+
+/// Headline texts that may carry a chapter number: title kickers and titles, list titles. (Scene
+/// layers are left alone: a process scene may label its own steps.)
+fn numbered_texts(k: &BeatKind) -> Vec<(&'static str, String)> {
+    match k {
+        BeatKind::Title { kicker, text, .. } => kicker.iter().map(|x| ("kicker", x.clone())).chain([("title", text.clone())]).collect(),
+        BeatKind::Bullets { title: Some(t), .. } => vec![("title", t.clone())],
+        _ => vec![],
+    }
+}
+
+/// "TIP 3", "Tip #3:", at the start of a text, with the edit's kicker word ("Tip"): the word and
+/// the number. None when the edit has no kicker.
+pub fn numbered(text: &str, kicker: &str) -> Option<(String, usize)> {
+    let k = kicker.trim().to_lowercase();
+    if k.is_empty() {
+        return None;
+    }
+    let t = text.trim().trim_start_matches('*').to_lowercase();
+    let rest = t.strip_prefix(&k)?.trim_start_matches([' ', '#', '*']);
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let after = rest[digits.len()..].chars().next();
+    if digits.is_empty() || after.is_some_and(|c| c.is_alphanumeric()) {
+        return None;
+    }
+    digits.parse().ok().map(|n| (k, n))
 }
 
 fn round_rect(r: &RectN) -> [f64; 4] {

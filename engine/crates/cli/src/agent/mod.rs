@@ -204,11 +204,13 @@ fn write_validated(llm: &Llm, model: &str, prompt: &str, dir: &Path, file: &str,
         }
     };
     let (ans, mut u) = llm.ask(model, prompt, &[], &log.join(format!("{name}.json")))?;
+    let mut last = ans.clone();
     let (sp, dropped) = match check(&ans) {
         Ok(sp) => (sp, vec![]),
         Err(errs) => {
             let (ans2, u2) = llm.ask(model, &prompts::fix(prompt, &ans, &errs), &[], &log.join(format!("{name}-fix.json")))?;
             u.add(&u2);
+            last = ans2.clone();
             match check(&ans2) {
                 Ok(sp) => (sp, vec![]),
                 Err(_) => {
@@ -221,7 +223,9 @@ fn write_validated(llm: &Llm, model: &str, prompt: &str, dir: &Path, file: &str,
             }
         }
     };
-    std::fs::write(dir.join(file), beats::render_file(&sp))?;
+    // a chapters answer may set how chapters are named on screen (output.kicker / output.intro)
+    let out = if sp.chapters.is_empty() { None } else { beats::agent_output(&last).or_else(|| beats::agent_output(&ans)) };
+    std::fs::write(dir.join(file), format!("{}{}", out.unwrap_or_default(), beats::render_file(&sp)))?;
     Ok(FileOut { usage: u, items: sp.beats.len() + sp.chapters.len(), dropped })
 }
 
@@ -485,16 +489,26 @@ fn chapters_and_visuals(llm: &Llm, o: &AgentOpts, dir: &Path, log: &Path, base: 
     starts.dedup();
     let ranges: Vec<(usize, usize, usize)> = starts.iter().enumerate().map(|(i, &a)| (i, a, starts.get(i + 1).copied().unwrap_or(n))).filter(|r| r.2 > r.1).collect();
 
+    // chapter number of each range (0: the intro before chapter 1), for on-screen numbering
+    let mut chs: Vec<(usize, String)> = s.chapters.iter().filter_map(|ch| anchor::resolve(&ch.at, src, &idx, (0, src.words.len()), &kept).ok().and_then(|r| r.word).map(|w| (c.pos_at_or_after(w), ch.title.clone()))).collect();
+    chs.sort_by_key(|x| x.0);
+    chs.dedup_by_key(|x| x.0);
+    let total = chs.len();
+
     // visuals per chapter, validated against the edit with chapters in it
     let (base, _, _) = load(dir)?;
+    let kicker = base.spec.output.kicker.clone();
     let (images, videos) = list_assets(dir);
     let bp = prompts::beats_prompt(&prompts::BeatsOpts { scenes: o.scenes, screen_pass: o.screen, images, videos, glossary });
     let tv = Instant::now();
     let res = par_map(ranges, o.jobs, |(i, a, b)| {
-        let text = brief::brief(c, a, b, 6, None, 40);
+        let num = chs.iter().filter(|x| x.0 <= a).count();
+        let title = num.checked_sub(1).map(|k| chs[k].1.as_str()).unwrap_or("");
+        let head = bp.strip_suffix("Chapter transcript:\n").unwrap_or(&bp);
+        let text = format!("{}Chapter transcript:\n{}", prompts::chapter_context(num, total, title, &kicker), brief::brief(c, a, b, 6, None, 40));
         let file = format!("beats/ch{:02}.yaml", i + 1);
         let scope = Some([Anchor(format!("w{}", c.kept[a])), Anchor(format!("w{}", c.kept[b - 1]))]);
-        write_validated(llm, &o.model, &format!("{bp}{text}"), dir, &file, scope, &base, src, Some(c), log, &format!("ch{:02}", i + 1))
+        write_validated(llm, &o.model, &format!("{head}{text}"), dir, &file, scope, &base, src, Some(c), log, &format!("ch{:02}", i + 1))
     });
     let mut vis = Usage::default();
     for r in res {

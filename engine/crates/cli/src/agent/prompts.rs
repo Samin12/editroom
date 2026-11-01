@@ -92,9 +92,33 @@ pub const REVIEW_PROMPT: &str = "These are ambiguous cut candidates from a raw r
 
 pub fn chapter_prompt(glossary: Option<&str>) -> String {
     format!(
-        "Split this video into YouTube chapters (one per real topic change; roughly every 3 to 12 minutes; the first chapter starts at the first line). Titles: 2 to 5 words in Title Case, his own wording, no em dashes, no numbering, never \"Level N\" or \"Part N\". `short`: 1 to 2 words for an on-screen badge.\n{}\nAnswer with YAML only, in exactly this shape (`at` = the word id that starts the chapter's first line):\nchapters:\n  - {{at: w0, title: Why YouTube Matters, short: Why}}\n\nTranscript (word id, [talk] on camera or [screen] demo, sentence):\n",
+        "Split this video into YouTube chapters: one per real topic change, roughly every 3 to 12 minutes. When he numbers his points (tip 1, step 2, part 3), the chapters are exactly those numbered points in his order, so chapter n is his point n.\n\
+The first chapter starts AFTER his hook and intro (the opening where he says what the video is and why to watch it): a chapter card there would cut into his first sentence. The intro gets no chapter; name it in `output.intro` (2 to 5 words), which becomes YouTube's 0:00 chapter.\n\
+`output.kicker` is what the chapters are called on screen: Tip, Step or Part when he numbers his points that way (the card then shows \"TIP 3 OF 10\"), or \"\" when he does not number them.\n\
+Titles: 2 to 5 words in Title Case, his own wording, no em dashes, no numbers (the kicker carries them). `short`: 1 to 2 words for an on-screen badge.\n{}\n\
+Answer with YAML only, in exactly this shape (`at` = the word id that starts the chapter's first line):\n\
+output: {{kicker: Tip, intro: Why Voice Beats Typing}}\n\
+chapters:\n  - {{at: w212, title: Talk Instead Of Typing, short: Voice}}\n\n\
+Transcript (word id, [talk] on camera or [screen] demo, sentence):\n",
         names_rule(glossary)
     )
+}
+
+/// Where a chapter's visuals sit in the video, so on-screen numbers follow the chapter order.
+pub fn chapter_context(n: usize, total: usize, title: &str, kicker: &str) -> String {
+    let k = kicker.trim();
+    if n == 0 {
+        return format!("This stretch is the intro, before chapter 1{}. Nothing on screen here carries a chapter number.\n\n", if k.is_empty() { String::new() } else { format!(" ({} 1)", k.to_uppercase()) });
+    }
+    let mut s = format!("This is chapter {n} of {total}: {title:?}.");
+    if k.is_empty() {
+        s.push_str(" He does not number his chapters: no \"tip n\" / \"step n\" kickers on screen.");
+    } else {
+        let up = k.to_uppercase();
+        s.push_str(&format!(" He calls his chapters {}s: a kicker or headline that numbers it says {up} {n}, never another number.", k.to_lowercase()));
+    }
+    s.push_str("\n\n");
+    s
 }
 
 /// What the visuals prompt may offer.
@@ -135,7 +159,7 @@ pub fn beats_prompt(o: &BeatsOpts) -> String {
         s.push_str("- {at: wN, kind: callout, text: \"...\"}   a 2 to 4 word pill; the only kind allowed on [screen] lines\n");
     }
     s.push_str(
-        "\nRules:\n- Proof first: when he makes a claim about something real, show the real thing while he says it, with the key number or name in the caption. His own screen is the best proof, and on [screen] lines it is already showing.\n- Honest: never show more than he said or a source supports; never invent numbers, names or facts. If he says \"might\", never write \"will\".\n- Stage kinds (title, bullets, number, code, quote, image, video, scene) only on [talk] lines.",
+        "\nRules:\n- Proof first: when he makes a claim about something real, show the real thing while he says it, with the key number or name in the caption. His own screen is the best proof, and on [screen] lines it is already showing.\n- Honest: on-screen words never claim more than he said. Keep his qualifiers (\"for me\", \"might\", \"about\", \"found\") and his exact verb. Wrong: he says \"for me the subscription is worth it\", the headline says \"Subscriptions beat API pricing\". Wrong: he says \"I found a hole in 15 minutes\", the headline says \"Built in 15 minutes\". Never invent numbers, names or facts.\n- Stage kinds (title, bullets, number, code, quote, image, video, scene) only on [talk] lines.",
     );
     if o.screen_pass {
         s.push_str(" Leave [screen] lines alone: another pass marks up the screen.");
@@ -164,6 +188,7 @@ SCENES must look designed, not like a wireframe:
 - Pick the shape his words describe: a comparison (two big cards), a hub (many into one), a hierarchy (one over many), a stack ("layers", "built on top of": bars bottom-up), a flow (A to B to C left to right), a stat beside its proof. Every box says something specific from his words; never several boxes with the same label.
 - Build it on his words: every layer gets `in: {at: wN}` on the word that introduces it, at least 3 different words across the scene. The key element enters with `from: pop`.
 - Finish early: the last layer (arrows included) enters at least 2 s (about 6 words) before `until`, so the finished picture holds while he talks about it. Set `until` on the word where he moves on, not on the last word you animate.
+- Counters: `to` is the number; `prefix` and `suffix` are a symbol or unit only ($, +, %, x, k, M, wpm), never digits (`prefix: "250+ "` shows "250+ 250").
 - Keep it moving: give the payoff a slow push-in, `keys: [{t: wN, ms: 4000, scale: 1.06}]`, so nothing sits still for more than about 4 s.
 - Emphasis: the one element that matters gets `fill: accent_soft, stroke: accent, width: 4`; the rest stay plain (`fill: card2`). 4 to 9 layers. Coordinates are 0..1 of the panel from its top-left; text `x` is its centre with `align: center`.
 

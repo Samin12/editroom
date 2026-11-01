@@ -241,7 +241,7 @@ fn main() -> anyhow::Result<()> {
     // Cover-fit of a 1920x1080 screen into the panel.
     let k = (panel.width() / W as f32).max(panel.height() / H as f32);
     let map = ScreenMap { x: panel.left() + (panel.width() - W as f32 * k) * 0.5, y: panel.top() + (panel.height() - H as f32 * k) * 0.5, sx: W as f32 * k, sy: H as f32 * k, clip: panel };
-    let chapter = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 0.0, card: Some((0.0, 1800.0)) };
+    let chapter = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into() };
     let sc = Scene { gfx, panel, camera, badge, screen: fake_screen(), cam: fake_camera(), map, chapter };
     let g = &sc.gfx;
 
@@ -339,13 +339,13 @@ fn main() -> anyhow::Result<()> {
         push(&format!("90-card-{t:04}"), pm);
     }
     let mut pm = Pixmap::new(W, H).unwrap();
-    let ch0 = ResolvedChapter { n: 4, title: "A chapter without a tracker".into(), short: "Bonus".into(), at_ms: 0.0, card: Some((0.0, 1800.0)) };
+    let ch0 = ResolvedChapter { n: 4, title: "A chapter without a tracker".into(), short: "Bonus".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into() };
     g.chapter_card(&mut pm, &ch0, 0, 1300.0);
     push("91-card-no-total", pm);
 
     // Badge pop + pill variant + captions.
     let mut pm = sc.base(1900.0, None);
-    let ch5 = ResolvedChapter { n: 5, title: "Recreate viral videos".into(), short: "Go viral".into(), at_ms: 0.0, card: None };
+    let ch5 = ResolvedChapter { n: 5, title: "Recreate viral videos".into(), short: "Go viral".into(), at_ms: 0.0, card: None, kicker: "Step".into() };
     g.captions(&mut pm, panel, &words("and this is where it gets interesting because the agent does all of it", 1000.0, 230.0), 2000.0);
     g.badge(&mut pm, Rect::from_xywh(camera.left(), camera.bottom() + 20.0, camera.width(), 56.0).unwrap(), &ch5, 8, 5000.0);
     push("95-captions-badges", pm);

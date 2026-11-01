@@ -66,17 +66,50 @@ pub fn resolved(base: &Loaded, src: &Source, file: &str, spec: &Spec) -> Vec<Opt
 /// Chapters closer together than this are one topic split in two.
 pub const MIN_CHAPTER_MS: f64 = 45_000.0;
 
+/// Videos longer than this have a hook, and the first chapter starts after it.
+pub const HOOK_VIDEO_MS: f64 = 120_000.0;
+/// A first chapter this close to 0:00 sits on the hook.
+pub const HOOK_MS: f64 = 5000.0;
+
 pub fn chapter_gap_errors(base: &Loaded, src: &Source, file: &str, spec: &Spec) -> Vec<String> {
-    if spec.chapters.len() < 2 {
+    if spec.chapters.is_empty() {
         return vec![];
     }
     let (l, _) = with_file(base, file, spec);
     let plan = resolve::build(&l, src);
-    plan.chapters
+    let mut out: Vec<String> = plan
+        .chapters
         .windows(2)
         .filter(|w| w[1].at_ms - w[0].at_ms < MIN_CHAPTER_MS)
         .map(|w| format!("chapters {:?} and {:?} are only {:.0}s apart: merge them (a chapter is a real topic, usually minutes long)", w[0].title, w[1].title, (w[1].at_ms - w[0].at_ms) / 1000.0))
-        .collect()
+        .collect();
+    if let Some(c) = plan.chapters.first() {
+        if c.at_ms < HOOK_MS && plan.duration_ms() > HOOK_VIDEO_MS {
+            out.push(format!("chapter {:?} starts at {}: that is his hook, and a card there cuts into his first sentence; start chapter 1 where his first real section begins (the intro gets no chapter; name it in output.intro)", c.title, resolve::clock(c.at_ms)));
+        }
+    }
+    out
+}
+
+/// The `output` keys an agent may set from a chapters answer (`kicker`, `intro`), as one flow line.
+pub fn agent_output(text: &str) -> Option<String> {
+    let doc: Value = serde_yaml::from_str(text).ok()?;
+    let m = doc.get("output")?.as_mapping()?;
+    let mut keep = serde_json::Map::new();
+    for k in ["kicker", "intro"] {
+        match m.get(k) {
+            Some(Value::String(v)) if v.chars().count() <= 60 => {
+                let v = v.trim();
+                let v = if k == "kicker" { v.split_whitespace().next().unwrap_or("").chars().take(16).collect::<String>() } else { v.to_string() };
+                keep.insert(k.into(), serde_json::Value::String(v));
+            }
+            Some(Value::Null) if k == "kicker" => {
+                keep.insert(k.into(), serde_json::Value::String(String::new()));
+            }
+            _ => {}
+        }
+    }
+    (!keep.is_empty()).then(|| format!("output: {}\n", serde_json::Value::Object(keep)))
 }
 
 /// Stage beats anchored on a [screen] line would cover his screen.

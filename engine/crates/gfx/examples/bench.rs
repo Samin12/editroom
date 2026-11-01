@@ -74,7 +74,7 @@ fn main() -> anyhow::Result<()> {
         ("callout", beat(BeatKind::Callout { text: "This is the number that matters".into(), pos: None }, 0.0, 3000.0)),
         ("lower", beat(BeatKind::Lower { title: "Samin Yasar".into(), sub: Some("Founder, AI Answers".into()) }, 0.0, 4000.0)),
     ];
-    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 0.0, card: Some((0.0, 1800.0)) };
+    let ch = ResolvedChapter { n: 3, title: "Design your character".into(), short: "Design".into(), at_ms: 0.0, card: Some((0.0, 1800.0)), kicker: "Step".into() };
 
     println!("{:<12} {:>10} {:>10} {:>10} {:>10}", "item", "1080p ms", "(cold)", "2160p ms", "(cold)");
     let mut rows: Vec<(String, [(f64, f64); 2])> = vec![];
