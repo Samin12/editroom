@@ -313,6 +313,15 @@ pub enum BeatKind {
         #[serde(default)]
         by: Option<String>,
     },
+    /// A custom animation: layers (text, shapes, arrows, images, code, counters, highlights)
+    /// with their own entrances, exits and keyframes, anchored to words. See `crate::scene`.
+    Scene {
+        #[serde(default)]
+        place: crate::scene::Place,
+        #[serde(default)]
+        bg: crate::scene::Bg,
+        layers: Vec<crate::scene::Layer>,
+    },
     // ---- overlays (coordinates are SCREEN-normalized, so they follow the panel and zooms) ----
     /// A ring drawn around something on screen.
     Ring { rect: RectN },
@@ -357,7 +366,7 @@ impl BeatKind {
     pub fn lane(&self) -> Lane {
         use BeatKind::*;
         match self {
-            Title { .. } | Bullets { .. } | Number { .. } | Image { .. } | Video { .. } | Code { .. } | Quote { .. } => Lane::Stage,
+            Title { .. } | Bullets { .. } | Number { .. } | Image { .. } | Video { .. } | Code { .. } | Quote { .. } | Scene { .. } => Lane::Stage,
             Ring { .. } | Highlight { .. } | Arrow { .. } | Callout { .. } | Lower { .. } => Lane::Overlay,
             Blur { .. } | Zoom { .. } => Lane::Screen,
             Layout { .. } => Lane::Layout,
@@ -374,6 +383,7 @@ impl BeatKind {
             Video { .. } => "video",
             Code { .. } => "code",
             Quote { .. } => "quote",
+            Scene { .. } => "scene",
             Ring { .. } => "ring",
             Highlight { .. } => "highlight",
             Arrow { .. } => "arrow",
@@ -396,7 +406,14 @@ impl BeatKind {
             Ring { .. } | Highlight { .. } | Arrow { .. } | Callout { .. } => 2500.0,
             Lower { .. } => 4000.0,
             Blur { .. } | Zoom { .. } | Layout { .. } => 3000.0,
+            Scene { .. } => 6000.0,
         }
+    }
+
+    /// A stage beat drawn over the whole frame instead of the panel (`scene` with
+    /// `place: frame`).
+    pub fn full_frame(&self) -> bool {
+        matches!(self, BeatKind::Scene { place: crate::scene::Place::Frame, .. })
     }
 }
 
