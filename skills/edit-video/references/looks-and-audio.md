@@ -31,28 +31,56 @@ talking-head stretch with nothing on screen, or `mode: screen` for a full-width 
 
 ## Music bed
 
-`--music bed.mp3` on the pipeline copies it to `W/music/` and sets:
+`--music bed.mp3` on the pipeline copies it to `W/music/` and sets (engine reference: `engine/docs/AUDIO.md`):
 
 ```yaml
 output: {height: 1080, fps: 30, chapter_cards: insert, card_ms: 1800,
-         music: {src: "music/bed.mp3", gain_db: -18, duck_db: -12, attack_ms: 60, release_ms: 450, fade_ms: 1500}}
+         music: {src: "music/bed.mp3", gain_db: -18, duck_db: 12, fade_ms: 1500}}
 ```
 
-It loops under the whole video, dips `duck_db` under his voice, and fades in and out. Lower
-`gain_db` (-22) for a talk-heavy tutorial; never use a commercial track without a license (Content
-ID). Edit the numbers in `edit.yaml` and `--from-stage render`.
+| field | default | what |
+|---|---|---|
+| `src` | required | audio file, relative to the work dir (`check` errors when it is missing) |
+| `gain_db` | -18 | level of the bed against the file's own level |
+| `duck_db` | 12 | how many dB **quieter** the bed gets while he talks (a positive number) |
+| `attack_ms` | 60 | how fast it ducks when speech starts |
+| `release_ms` | 450 | how fast it comes back after speech stops (after a 250 ms hold, so it does not pump between words) |
+| `fade_ms` | 1500 | fade in at the start and out at the end of the video |
+| `threshold_db` | -45 | narration level (dBFS short-term peak) that counts as speech |
+
+It loops to the length of the video, keeps playing under the (silent) chapter cards, and is mixed
+before `--loudnorm`, so the final -14 LUFS includes it. A talk-heavy tutorial: `gain_db: -22`.
+Preview without it: `--render-args "--no-music"`. Never use a commercial track without a license
+(Content ID). Edit the numbers in `edit.yaml`, then `--from-stage render`.
+
+## Narration source
+
+The voice track is the **mic** clips; else the camera's own audio; else the system audio. System
+audio (sound from the screen recording) mixes under the narration at 0.6
+(`--render-args "--system-gain 0.3"`; 0 mutes it). Every cut edge gets a 5 ms fade, so cuts never click.
 
 ## Loudness
 
 The pipeline renders with `--loudnorm`: -14 LUFS integrated, true peak -1.5 dBTP, YouTube's
-reference. System audio (sound from the screen recording) mixes under the mic at 0.6; change with
-`--render-args "--system-gain 0.3"` (0 mutes it).
+reference.
 
 ## Resolution and codec
 
 1080p30 H.264 on the hardware encoder by default. `--height 2160` for 4K (about 5x realtime instead
 of 15x), `--codec hevc` for smaller files. Do not use `x264` unless the hardware encoder fails: it
 competes with the decoders for the CPU.
+
+## Footage, b-roll and pre-rendered clips: the `video` beat
+
+```yaml
+- {at: w800, until: w860, kind: video, src: clips/broll.mp4, fit: panel}
+- {at: w900, until: w940, kind: video, src: clips/lower-third.mov, fit: frame, alpha: true, loop: false}
+```
+
+`fit: card` (default: on a card in the panel, loops), `panel` (fills the panel slot), `frame` (the
+whole frame under the camera tile; a transparent `.mov` overlays the footage). `alpha` defaults to
+what the file has; `loop` defaults to true for `card`, false otherwise (the last frame holds).
+Clips are muted. `from: 12.5` starts 12.5 s into the clip.
 
 ## Captions
 

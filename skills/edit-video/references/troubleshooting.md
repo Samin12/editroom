@@ -11,12 +11,14 @@
 | plain files: no transcript | whisper-cli missing | `brew install whisper-cpp`, or pass `--transcript words.json` |
 | analyze: agent failed | `claude` not logged in, rate limit, network | `claude -p "hi"` to test; rerun `--from-stage analyze` |
 | analyze: privacy failed | tesseract missing or a screen clip unreadable | `logs/privacy.log`; never skip privacy |
-| `engine has no proofs command yet` | an older engine build | `bash "$ER/scripts/install.sh" --force` from an up-to-date checkout |
-| gate 11 loops | the same beat keeps failing | remove that beat, note it in the report |
+| `is an old cutroom build` | `~/.editroom/bin/cutroom` predates the merged engine | `bash "$ER/scripts/install.sh" --force` |
+| gate 11 a third time | the same beat keeps failing | remove every beat the errors name (move to `W/agent/removed-by-check.yaml`), note them in the report |
+| a cut removed something he meant to keep | the editorial pass misjudged it | delete its `by: agent` line in `cuts.yaml` (`review.md` lists them all), `--from-stage check` |
+| music is too loud / pumps | bed level or duck | `gain_db: -22`, `duck_db: 12-15`, `release_ms: 600` in `output.music` |
 | render refuses | check has errors or a visible privacy finding | fix them; never `--force` |
 | render slow / Mac pinned | several renders or Remotion jobs at once | one render at a time; the engine already uses every core |
 | QA: camera frozen | a missing camera clip in the source | check the take in Borumi; re-ingest |
-| video looks different from Borumi | cutroom renders its own composition (camera + screen + graphics) | Borumi effects, overlays, cursor styling and its own music are not copied; set `style:`, add `--music` |
+| video looks different from Borumi | cutroom renders its own composition (camera + screen + graphics) | Borumi effects, overlays and cursor styling are not copied; set `style:`, add `--music`, use `scene` beats |
 | a 2x playback in the source | cutroom plays source clips at 1x | fine for screen playback he recorded; a sped-up Borumi segment plays at normal speed |
 
 ## Where things are

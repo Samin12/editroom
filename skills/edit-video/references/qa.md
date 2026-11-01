@@ -5,7 +5,10 @@ Three layers, cheapest first. The pipeline runs the first two; the third is your
 ## 1. The engine (`cutroom check`, before render)
 
 Errors block the render: an anchor on a cut word or not found, overlapping stage beats in one slot,
-a missing file, an empty panel, an unblurred privacy finding, a pending proof. Fix the beat named in
+a missing file (images, video clips, the music bed), an empty panel, a scene layer missing a needed
+field, an unblurred privacy finding. Pending proofs are warnings, but render refuses while any is
+pending (the `drop` stage resolves them). Warnings worth fixing: text under 28 units, a scene layer
+under the camera tile, a layer time outside its beat, a beat under 1.5 s. Fix the beat named in
 `W/logs/check.txt`; never delete a blur beat and never render with `--force`.
 
 ## 2. The file (`scripts/qa.py`, after render)

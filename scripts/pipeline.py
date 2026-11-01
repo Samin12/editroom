@@ -34,6 +34,7 @@ ROOT = os.path.dirname(HERE)
 EDITROOM_HOME = os.path.expanduser(os.environ.get("EDITROOM_HOME", "~/.editroom"))
 STAGES = ["ingest", "setup", "analyze", "proofs", "drop", "check", "sheet", "render", "qa", "report"]
 GATE_PROOFS, GATE_CHECK, GATE_REVIEW = 10, 11, 12
+MAX_ROUNDS = 2  # per gate; then proofs are dropped, the review is skipped, check asks for removal
 
 
 def clock(s):
@@ -60,17 +61,15 @@ class Run:
     def __init__(self, a):
         self.a = a
         self.cut = cutroom_bin()
-        self.help = {}
         self.work = None
         self.state = {}
 
-    # --- engine feature detection (the engine branches add commands and flags) ---
-    def supports(self, sub, flag=None):
-        if sub not in self.help:
-            r = subprocess.run([self.cut, sub, "--help"], capture_output=True, text=True)
-            self.help[sub] = r.stdout if r.returncode == 0 else ""
-        h = self.help[sub]
-        return bool(h) and (flag is None or flag in h)
+    def require_new_engine(self):
+        """The plugin needs the merged engine (agent passes, proofs, music, privacy rules)."""
+        r1 = subprocess.run([self.cut, "proofs", "--help"], capture_output=True, text=True)
+        r2 = subprocess.run([self.cut, "agent", "--help"], capture_output=True, text=True)
+        if r1.returncode != 0 or "--cut-model" not in r2.stdout:
+            sys.exit(f"editroom: {self.cut} is an old cutroom build. Run: bash {os.path.join(HERE, 'install.sh')} --force")
 
     # --- state and log ---
     def load_state(self):
@@ -180,17 +179,6 @@ def st_setup(r, proj):
         src = os.path.join(tdir, name)
         if os.path.exists(src) and not os.path.exists(dst) and not a.dry_run:
             shutil.copy(src, dst)
-    if a.allow and not a.dry_run:
-        p = os.path.join(r.work, "privacy-rules.yaml")
-        txt = open(p).read() if os.path.exists(p) else "patterns: []\n"
-        extra = "".join(f"  - {json.dumps(v)}\n" for v in a.allow)
-        if re.search(r"^allow:\s*\[\s*\]\s*$", txt, re.M):
-            txt = re.sub(r"^allow:\s*\[\s*\]\s*$", "allow:\n" + extra.rstrip("\n"), txt, flags=re.M)
-        elif re.search(r"^allow:\s*$", txt, re.M):
-            txt = re.sub(r"^allow:\s*$", "allow:\n" + extra.rstrip("\n"), txt, count=1, flags=re.M)
-        else:
-            txt += "allow:\n" + extra
-        open(p, "w").write(txt)
     if a.music and not a.dry_run:
         os.makedirs(os.path.join(r.work, "music"), exist_ok=True)
         dst = os.path.join("music", os.path.basename(a.music))
@@ -202,7 +190,7 @@ def st_setup(r, proj):
 def set_music(edit_path, src):
     """Add output.music to edit.yaml without a YAML library (the template's output is a flow map)."""
     txt = open(edit_path).read()
-    music = f"music: {{src: {json.dumps(src)}, gain_db: -18, duck_db: -12, fade_ms: 1500}}"
+    music = f"music: {{src: {json.dumps(src)}, gain_db: -18, duck_db: 12, fade_ms: 1500}}"
     if "music:" in txt:
         txt = re.sub(r"music:\s*\{[^}]*\}", music, txt)
     elif re.search(r"^output:\s*\{.*\}\s*$", txt, re.M):
@@ -221,8 +209,7 @@ def st_analyze(r, proj):
     for v in a.allow or []:
         priv += ["--allow", v]
     agent = [r.cut, "agent", r.work, "--model", a.model, "--jobs", str(a.jobs)]
-    if a.cut_model and r.supports("agent", "--cut-model"):
-        agent += ["--cut-model", a.cut_model]
+    agent += ["--cut-model", a.cut_model]
     if a.agent_args:
         agent += shlex.split(a.agent_args)
     if a.dry_run:
@@ -247,18 +234,19 @@ def st_analyze(r, proj):
 
 
 def pending_proofs(r):
-    if not r.supports("proofs"):
-        return None
     code, out = r.sh([r.cut, "proofs", r.work], "proofs", check=False)
     if code != 0:
         raise StageError(f"cutroom proofs failed; see logs/proofs.log\n{out[-800:]}")
-    m = re.search(r"(\[.*\]|\{.*\})", out, re.S)
-    data = json.loads(m.group(1)) if m else []
-    if isinstance(data, dict):
-        data = data.get("pending", data.get("requests", []))
+    m = re.search(r"\[.*\]", out, re.S)
+    data = json.loads(m.group(0)) if m else []
     with open(os.path.join(r.work, "proofs-pending.json"), "w") as f:
         json.dump(data, f, indent=1)
     return data
+
+
+def gate_round(r, stage):
+    """How many times this gate already stopped the run (each gate gets at most MAX_ROUNDS)."""
+    return r.state.setdefault("gate_rounds", {}).get(stage, 0)
 
 
 def st_proofs(r, proj):
@@ -266,19 +254,21 @@ def st_proofs(r, proj):
         r.sh([r.cut, "proofs", r.work])
         return ""
     data = pending_proofs(r)
-    if data is None:
-        return "engine has no `proofs` command yet: skipped"
     if not data:
         return "no proof requests"
     os.makedirs(os.path.join(r.work, "proof"), exist_ok=True)
     if r.a.no_proof:
-        return f"{len(data)} requests, skipped (--no-proof): drop will replace them"
+        return f"{len(data)} requests, skipped (--no-proof): drop turns them into text beats"
     if r.a.auto_proof:
         auto_capture(r, data)
-        left = pending_proofs(r) or []
+        left = pending_proofs(r)
         return f"{len(data)} requests, {len(data) - len(left)} captured headless"
-    raise Gate(GATE_PROOFS, f"{len(data)} proof requests in {os.path.join(r.work, 'proofs-pending.json')}: "
-                            "capture each (one proof-capturer per request, in parallel), then --from-stage drop")
+    n = gate_round(r, "proofs")
+    if n >= MAX_ROUNDS:
+        return f"{len(data)} still pending after {n} capture rounds: drop turns them into text beats"
+    raise Gate(GATE_PROOFS, f"round {n + 1} of {MAX_ROUNDS}: {len(data)} proof requests in "
+                            f"{os.path.join(r.work, 'proofs-pending.json')}. Capture each (one proof-capturer per "
+                            "request, all in parallel), then rerun (it continues at drop)")
 
 
 def auto_capture(r, reqs):
@@ -305,8 +295,6 @@ def st_drop(r, proj):
     """Apply captured proof (highlight + source pill) to its beats, then replace what is still missing."""
     _, out = r.sh([sys.executable, "-I", os.path.join(HERE, "apply_proofs.py"), r.work], "apply-proofs")
     applied = out.strip().splitlines()[-1] if out.strip() else ""
-    if not r.supports("proofs", "--drop-missing"):
-        return f"{applied}; engine has no `proofs --drop-missing` yet"
     _, out = r.sh([r.cut, "proofs", r.work, "--drop-missing"], "drop")
     last = out.strip().splitlines()[-1] if out.strip() else ""
     return f"{applied}; {last}"
@@ -320,7 +308,10 @@ def st_check(r, proj):
         f.write(out)
     last = out.strip().splitlines()[-1] if out.strip() else ""
     if code != 0:
-        raise Gate(GATE_CHECK, f"check found errors ({last}); fix them (see logs/check.txt), then --from-stage check")
+        n = gate_round(r, "check")
+        todo = ("fix each error named in logs/check.txt" if n < MAX_ROUNDS else
+                "round 3+: REMOVE every beat named by an error in logs/check.txt (move it to agent/removed-by-check.yaml)")
+        raise Gate(GATE_CHECK, f"round {n + 1}: check found errors ({last}); {todo}, then rerun (it continues at check)")
     return last
 
 
@@ -339,6 +330,10 @@ def st_sheet(r, proj):
 
     def label(b):
         txt = b.get("text") or b.get("title") or b.get("value") or b.get("label") or b.get("src") or ""
+        if b.get("kind") == "scene":
+            parts = [l.get("text") or l.get("label") or l.get("title") or (f"{l.get('prefix') or ''}{l.get('to')}" if l.get("type") == "counter" else "")
+                     for l in b.get("layers", [])]
+            txt = f"{len(b.get('layers', []))} layers, {b.get('place', 'stage')}: " + " | ".join(t for t in parts if t)
         if not txt and b.get("items"):
             txt = "; ".join(i if isinstance(i, str) else i.get("text", "") for i in b["items"])
         return f"{b.get('kind')}: {str(txt)[:90]}  ({b.get('origin', '')})"
@@ -365,8 +360,11 @@ def st_sheet(r, proj):
         n = len(jobs)
     if r.a.no_review:
         return f"{n} sheets (review skipped)"
-    raise Gate(GATE_REVIEW, f"{n} contact sheets in {review}: look at each, fix beats, then --from-stage render "
-                            f"(or --from-stage check after edits)")
+    k = gate_round(r, "sheet")
+    if k >= MAX_ROUNDS:
+        return f"{n} sheets ({k} review rounds done)"
+    raise Gate(GATE_REVIEW, f"round {k + 1} of {MAX_ROUNDS}: {n} contact sheets in {review} (frame lists in sheet-NN.md). "
+                            "Review them, apply fixes, then rerun: --from-stage check if you changed beats, else plain rerun (it continues at render)")
 
 
 def next_version(out_dir, name):
@@ -429,6 +427,17 @@ def st_report(r, proj):
         for f in found:
             kinds[f.get("kind", "?")] = kinds.get(f.get("kind", "?"), 0) + 1
         lines += ["", f"## Privacy: {len(found)} finding{'s' if len(found) != 1 else ''} blurred", ""] + [f"- {k}: {n}" for k, n in sorted(kinds.items())]
+    cuts = os.path.join(w, "cuts.yaml")
+    if os.path.exists(cuts):
+        who = lambda name: sum(1 for l in open(cuts) if re.search(r"""["']?\bby["']?\s*:\s*["']?""" + name + r"\b", l))
+        agent_cuts, human_cuts = who("agent"), who("human")
+        lines += ["", f"## Cuts: {agent_cuts} editorial cuts by the agent, {human_cuts} by hand", "",
+                  f"`{os.path.join(w, 'review.md')}` lists every editorial cut with its time in the video and in the raw "
+                  "recording, the words removed and why. The agent can occasionally cut something he meant to keep "
+                  "(an instruction, an aside). To restore one: delete its line (`by: agent`) from "
+                  f"`{cuts}`, then rerun the pipeline with `--from-stage check` (not `analyze`: rerunning the agent "
+                  "regenerates its cuts). To force a cut: add `- {from: wA, to: wB, why: ..., by: human}` (kept forever). "
+                  "There is no keep list; changing `by:` to another value does not restore the words."]
     dropped = os.path.join(w, "agent", "dropped.yaml")
     if os.path.exists(dropped):
         lines += ["", "## Beats the agent dropped (failed checks twice)", "", "```yaml", open(dropped).read().strip()[:4000], "```"]
@@ -444,6 +453,11 @@ def st_report(r, proj):
         for x in rows:
             flag = f"  **FLAG:** {x['flag']}" if x.get("flag") else ""
             lines.append(f"- `{x.get('src', '?')}` ({x.get('verdict', '?')}): {x.get('claim', '')} <{x.get('url', '')}>{flag}")
+        fixed = [x for x in rows if x.get("caption")]
+        if fixed:
+            lines += ["", f"### On-screen corrections ({len(fixed)})", "",
+                      "The transcript misspelled these; the captions now use the spelling from the source:", ""]
+            lines += [f"- `{x.get('src')}`: \"{x['caption']}\"" for x in fixed]
     qa = os.path.join(w, "qa.md")
     if os.path.exists(qa):
         lines += ["", open(qa).read().strip()]
@@ -478,7 +492,7 @@ def main():
     ap.add_argument("--restart", action="store_true", help="forget earlier progress")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--model", default="sonnet", help="model for chapters and visuals")
-    ap.add_argument("--cut-model", default="opus", help="model for the editorial cut pass (when the engine has it)")
+    ap.add_argument("--cut-model", default="opus", help="model for the editorial cut pass")
     ap.add_argument("--jobs", type=int, default=12, help="parallel agent calls")
     ap.add_argument("--agent-args", help="extra flags for `cutroom agent`")
     ap.add_argument("--allow", action="append", help="privacy: a value that may stay visible (repeatable)")
@@ -493,12 +507,17 @@ def main():
     if a.render_args and "--force" in a.render_args:
         sys.exit("editroom never renders with --force: fix what check reports instead")
 
-    saved = os.path.join(os.path.abspath(os.path.expanduser(a.work)), "editroom-state.json") if a.work else ""
-    if not a.project and not a.files and saved and os.path.exists(saved):
+    wdir = os.path.abspath(os.path.expanduser(a.work)) if a.work else ""
+    saved = os.path.join(wdir, "editroom-state.json")
+    if not a.project and not a.files and wdir and os.path.exists(saved):
         proj = json.load(open(saved)).get("project") or resolve_project(a)  # resume a work dir by path alone
+    elif not a.project and not a.files and wdir and os.path.exists(os.path.join(wdir, "source.json")):
+        base = os.path.basename(wdir)  # a started edit without state: its folder names it
+        proj = {"kind": "existing", "name": a.name or (base[: -len(" editroom")] if base.endswith(" editroom") else base)}
     else:
         proj = resolve_project(a)
     r = Run(a)
+    r.require_new_engine()
     r.work = os.path.abspath(os.path.expanduser(a.work or proj["work_default"]))
     print(f"editroom: {proj['name']} -> {r.work}")
     if not a.dry_run:
@@ -541,6 +560,7 @@ def main():
                 r.log({"stage": st, "at": now(), "seconds": round(secs, 1), "status": "gate"})
                 r.state["done"][st] = {"at": now(), "seconds": round(secs, 1), "status": "gate"}
                 r.state["gate"] = {"stage": st, "code": g.code, "message": str(g)}
+                r.state.setdefault("gate_rounds", {})[st] = r.state["gate_rounds"].get(st, 0) + 1
                 r.save_state()
             print(f"GATE {st}: {g}", flush=True)
             sys.exit(g.code)

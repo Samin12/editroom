@@ -61,7 +61,7 @@ hand-back.
 
 ```yaml
 output:
-  music: {src: music/bed.mp3, gain_db: -18, duck_db: -12, attack_ms: 60, release_ms: 450, fade_ms: 1500}
+  music: {src: music/bed.mp3, gain_db: -18, duck_db: 12, attack_ms: 60, release_ms: 450, fade_ms: 1500}
 ```
 
 - Music loops under the whole video, ducks under narration, fades in and out.
